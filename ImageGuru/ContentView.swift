@@ -40,7 +40,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             } else {
                 // Always display only leaf folders (lowest-level folders without subfolders)
-                let foldersToDisplay: [URL] = findLeafFolders(from: selectedFolderURLs)
+                let foldersToDisplay: [URL] = findLeafFolders(from: selectedFolderURLs).sorted(by: naturalSort)
                 Text("Folders to Scan: " + foldersToDisplay.map { $0.lastPathComponent }.joined(separator: ", "))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -154,7 +154,13 @@ struct ContentView: View {
                                     uniqueArr.append(image)
                                 }
                             }
-                            return uniqueArr
+                            guard let first = uniqueArr.first else { return uniqueArr }
+                            let sortedRest = uniqueArr.dropFirst().sorted { a, b in
+                                let aFolder = URL(fileURLWithPath: a.path).deletingLastPathComponent()
+                                let bFolder = URL(fileURLWithPath: b.path).deletingLastPathComponent()
+                                return naturalSort(aFolder, bFolder)
+                            }
+                            return [first] + sortedRest
                         }()
                         let referenceFolder: String = {
                             guard let first = deduplicatedImages.first else { return "" }
@@ -332,7 +338,12 @@ struct ContentView: View {
             }
             print("--- Diagnostic End ---")
             DispatchQueue.main.async {
-                self.comparisonResults = results
+                let sortedResults = results.sorted { lhs, rhs in
+                    let lhsFolder = URL(fileURLWithPath: lhs.referenceImagePath).deletingLastPathComponent()
+                    let rhsFolder = URL(fileURLWithPath: rhs.referenceImagePath).deletingLastPathComponent()
+                    return naturalSort(lhsFolder, rhsFolder)
+                }
+                self.comparisonResults = sortedResults
                 self.isProcessing = false
                 self.processingProgress = nil
             }
@@ -366,5 +377,17 @@ struct ContentView: View {
         selectedForDeletion.removeAll()
         selectAllActive = false
     }
+    
+    private func naturalSort(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedAscending
+    }
 }
 
+private extension ImageComparisonResult {
+    var referenceImagePath: String {
+        switch type {
+        case .duplicate(let reference, _): return reference
+        case .similar(let reference, _): return reference
+        }
+    }
+}
