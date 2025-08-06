@@ -98,6 +98,7 @@ struct ImageAnalyzer {
         inFolders folders: [URL],
         similarityThreshold: Double,
         topLevelOnly: Bool,
+        progress: ((Double) -> Void)? = nil,
         completion: @escaping ([ImageComparisonResult]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -169,6 +170,11 @@ struct ImageAnalyzer {
             var results: [ImageComparisonResult] = []
 
             if topLevelOnly {
+                // Compute a flat array of all top-level image files in all folders
+                let allImageFiles = folders.flatMap { topLevelImageFiles(in: $0) }
+                let totalImages = allImageFiles.count
+                var imagesProcessed = 0
+                
                 // Analyze each folder separately without mixing hashes
                 for folderURL in folders {
                     let imageFiles = topLevelImageFiles(in: folderURL)
@@ -177,6 +183,8 @@ struct ImageAnalyzer {
                         if let hash = averageHash(for: url) {
                             hashes.append((url, hash))
                         }
+                        imagesProcessed += 1
+                        progress?(Double(imagesProcessed) / Double(totalImages))
                     }
                     let folderResults = analyzeHashes(hashes)
                     results.append(contentsOf: folderResults)
@@ -188,14 +196,19 @@ struct ImageAnalyzer {
                     imageFiles.append(contentsOf: allImageFiles(in: folderURL))
                 }
                 var hashes: [(url: URL, hash: UInt64)] = []
+                let total = imageFiles.count
+                var processed = 0
                 for url in imageFiles {
                     if let hash = averageHash(for: url) {
                         hashes.append((url, hash))
                     }
+                    processed += 1
+                    progress?(Double(processed) / Double(total))
                 }
                 results = analyzeHashes(hashes)
             }
 
+            progress?(1.0)
             DispatchQueue.main.async {
                 completion(results)
             }

@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var selectedForDeletion: Set<String> = []
     @State private var selectAllActive: Bool = false
     @State private var scanTopLevelOnly: Bool = false
+    @State private var processingProgress: Double? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -57,7 +58,15 @@ struct ContentView: View {
 
             Button(action: processImages) {
                 if isProcessing {
-                    ProgressView()
+                    if let progress = processingProgress {
+                        HStack {
+                            ProgressView(value: progress)
+                            Text("\(Int(progress * 100))%")
+                                .font(.caption)
+                        }
+                    } else {
+                        ProgressView()
+                    }
                 } else {
                     Text("Analyze Images")
                 }
@@ -302,11 +311,16 @@ struct ContentView: View {
         print("Similarity Threshold:", similarityThreshold)
         print("Top Level Only:", scanTopLevelOnly)
         isProcessing = true
+        processingProgress = 0
         comparisonResults = []
         
         // Always analyze images in leaf folders (folders without subfolders)
         let leafFolders = findLeafFolders(from: selectedFolderURLs)
-        ImageAnalyzer.analyzeImages(inFolders: leafFolders, similarityThreshold: similarityThreshold, topLevelOnly: scanTopLevelOnly) { results in
+        ImageAnalyzer.analyzeImages(inFolders: leafFolders, similarityThreshold: similarityThreshold, topLevelOnly: scanTopLevelOnly, progress: { value in
+            DispatchQueue.main.async {
+                self.processingProgress = value
+            }
+        }) { results in
             print("Analysis Complete. Results count:", results.count)
             for (i, r) in results.enumerated() {
                 switch r.type {
@@ -317,8 +331,11 @@ struct ContentView: View {
                 }
             }
             print("--- Diagnostic End ---")
-            self.comparisonResults = results
-            self.isProcessing = false
+            DispatchQueue.main.async {
+                self.comparisonResults = results
+                self.isProcessing = false
+                self.processingProgress = nil
+            }
         }
     }
     
