@@ -94,7 +94,22 @@ struct ContentView: View {
                             }
                             return uniqueArr
                         }()
+                        let referenceFolder: String = {
+                            guard let first = deduplicatedImages.first else { return "" }
+                            return URL(fileURLWithPath: first.path).deletingLastPathComponent().path
+                        }()
                         ForEach(Array(deduplicatedImages.enumerated()), id: \.element.path) { index, image in
+                            let folderPath = URL(fileURLWithPath: image.path).deletingLastPathComponent().path
+                            let pathColor: Color = {
+                                if index == 0 {
+                                    return .blue
+                                } else {
+                                    return folderPath != referenceFolder ? .red : .secondary
+                                }
+                            }()
+                            let folderName = URL(fileURLWithPath: image.path).deletingLastPathComponent().lastPathComponent
+                            let fileName = URL(fileURLWithPath: image.path).lastPathComponent
+                            let displayPath = folderName + "/" + fileName
                             HStack(alignment: .center, spacing: 10) {
                                 Image(nsImage: ImageAnalyzer.loadThumbnail(for: image.path))
                                     .resizable()
@@ -102,21 +117,21 @@ struct ContentView: View {
                                     .frame(width: 96, height: 96)
                                     .cornerRadius(6)
                                 if index == 0 {
-                                    Text(image.path)
+                                    Text(displayPath)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(pathColor)
                                         .lineLimit(2)
                                         .truncationMode(.middle)
-                                        .foregroundStyle(.blue)
                                 } else {
+                                    Text(displayPath)
+                                        .font(.caption)
+                                        .foregroundStyle(pathColor)
+                                        .lineLimit(2)
+                                        .truncationMode(.middle)
                                     Text("\(String(format: "%.0f", image.percent * 100))% match")
                                         .font(.caption)
                                         .foregroundStyle(.primary)
-                                    Text(image.path)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                        .truncationMode(.middle)
+
                                 }
                             }
                         }
