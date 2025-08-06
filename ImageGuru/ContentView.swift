@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var similarityThreshold: Double = 0.8
     @State private var comparisonResults: [ImageComparisonResult] = []
     @State private var isProcessing: Bool = false
+    @State private var selectedForDeletion: Set<String> = []
+    @State private var selectAllActive: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -56,6 +58,50 @@ struct ContentView: View {
             .disabled(selectedFolderURLs.isEmpty || isProcessing)
 
             Divider()
+            
+            if !comparisonResults.isEmpty {
+                HStack(spacing: 20) {
+                    Button(action: {
+                        if selectAllActive {
+                            // Deselect all
+                            selectedForDeletion.removeAll()
+                            selectAllActive = false
+                        } else {
+                            // Select all deletable images (not reference images)
+                            let allImagePaths = comparisonResults.flatMap { result in
+                                // Extract all but the first image in the group
+                                let images: [(String, Double)] = {
+                                    switch result.type {
+                                    case .duplicate(let reference, let duplicates):
+                                        var arr = [(reference, 1.0)]
+                                        arr.append(contentsOf: duplicates)
+                                        return arr
+                                    case .similar(let reference, let similars):
+                                        var arr = [(reference, 1.0)]
+                                        arr.append(contentsOf: similars)
+                                        return arr
+                                    }
+                                }()
+                                // Deduplicate images by path while preserving order
+                                var seen = Set<String>()
+                                var uniqueArr = [(String, Double)]()
+                                for image in images { if !seen.contains(image.0) { seen.insert(image.0); uniqueArr.append(image) } }
+                                return uniqueArr.dropFirst().map { $0.0 } // skip reference
+                            }
+                            selectedForDeletion = Set(allImagePaths)
+                            selectAllActive = true
+                        }
+                    }) {
+                        Text(selectAllActive ? "Deselect All" : "Select All")
+                    }
+                    Button(action: deleteSelectedImages) {
+                        Text("Delete Selected")
+                    }
+                    .disabled(selectedForDeletion.isEmpty)
+                    .foregroundStyle(selectedForDeletion.isEmpty ? .secondary : .primary)
+                    .foregroundColor(selectedForDeletion.isEmpty ? nil : .red)
+                }
+            }
 
             if comparisonResults.isEmpty {
                 Text("No duplicate or similar images detected yet.")
@@ -104,13 +150,26 @@ struct ContentView: View {
                                 if index == 0 {
                                     return .blue
                                 } else {
-                                    return folderPath != referenceFolder ? .red : .secondary
+                                    return Color.red
                                 }
                             }()
                             let folderName = URL(fileURLWithPath: image.path).deletingLastPathComponent().lastPathComponent
                             let fileName = URL(fileURLWithPath: image.path).lastPathComponent
                             let displayPath = folderName + "/" + fileName
                             HStack(alignment: .center, spacing: 10) {
+                                if index != 0 {
+                                    Toggle(isOn: Binding(
+                                        get: { selectedForDeletion.contains(image.path) },
+                                        set: { checked in
+                                            if checked { selectedForDeletion.insert(image.path) }
+                                            else { selectedForDeletion.remove(image.path) }
+                                        }
+                                    )) {
+                                        EmptyView()
+                                    }
+                                    .toggleStyle(.checkbox)
+                                    .frame(width: 20)
+                                }
                                 Image(nsImage: ImageAnalyzer.loadThumbnail(for: image.path))
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
@@ -119,18 +178,18 @@ struct ContentView: View {
                                 if index == 0 {
                                     Text(displayPath)
                                         .font(.caption)
-                                        .foregroundStyle(pathColor)
+                                        .foregroundColor(pathColor)
                                         .lineLimit(2)
                                         .truncationMode(.middle)
                                 } else {
                                     Text(displayPath)
                                         .font(.caption)
-                                        .foregroundStyle(pathColor)
+                                        .foregroundColor(pathColor)
                                         .lineLimit(2)
                                         .truncationMode(.middle)
                                     Text("\(String(format: "%.0f", image.percent * 100))% match")
                                         .font(.caption)
-                                        .foregroundStyle(.primary)
+                                        .foregroundColor(.primary)
 
                                 }
                             }
@@ -166,6 +225,34 @@ struct ContentView: View {
             self.comparisonResults = results
             self.isProcessing = false
         }
+    }
+    
+    private func deleteSelectedImages() {
+        let fileManager = FileManager.default
+        for path in selectedForDeletion {
+            try? fileManager.removeItem(atPath: path)
+        }
+        // Remove deleted images from comparisonResults
+        comparisonResults = comparisonResults.compactMap { result in
+            let filtered: [(path: String, percent: Double)] = {
+                switch result.type {
+                case .duplicate(let reference, let duplicates):
+                    return [(reference, 1.0)] + duplicates.filter { !selectedForDeletion.contains($0.path) }
+                case .similar(let reference, let similars):
+                    return [(reference, 1.0)] + similars.filter { !selectedForDeletion.contains($0.path) }
+                }
+            }()
+            // Remove group if only reference remains
+            if filtered.count <= 1 { return nil }
+            switch result.type {
+            case .duplicate(let reference, _):
+                return ImageComparisonResult(type: .duplicate(reference: reference, duplicates: Array(filtered.dropFirst())))
+            case .similar(let reference, _):
+                return ImageComparisonResult(type: .similar(reference: reference, similars: Array(filtered.dropFirst())))
+            }
+        }
+        selectedForDeletion.removeAll()
+        selectAllActive = false
     }
 }
 
