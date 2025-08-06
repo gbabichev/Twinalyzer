@@ -48,7 +48,6 @@ struct ContentView: View {
             }
 
             HStack {
-                Text("Similarity Precision: ")
                 Slider(value: $similarityThreshold, in: 0.5...1.0, step: 0.01) {
                     Text("Similarity Threshold")
                 }
@@ -75,6 +74,7 @@ struct ContentView: View {
 
             Divider()
             
+            // Controls for select all / delete selected, only if results available
             if !comparisonResults.isEmpty {
                 HStack(spacing: 20) {
                     Button(action: {
@@ -123,108 +123,164 @@ struct ContentView: View {
                 Text("No duplicate or similar images detected yet.")
                     .foregroundStyle(.secondary)
             } else {
-                List(comparisonResults) { result in
-                    VStack(alignment: .leading, spacing: 4) {
-                        // Prepare array of (path, percent) for this group
-                        let images: [(path: String, percent: Double)] = {
-                            switch result.type {
-                            case .duplicate(let reference, let duplicates):
-                                var arr = [(path: String, percent: Double)]()
-                                arr.append((reference, 1.0))
-                                for dup in duplicates {
-                                    arr.append((dup.path, dup.percent))
-                                }
-                                return arr
-                            case .similar(let reference, let similars):
-                                var arr = [(path: String, percent: Double)]()
-                                arr.append((reference, 1.0))
-                                for sim in similars {
-                                    arr.append((sim.path, sim.percent))
-                                }
-                                return arr
-                            }
-                        }()
-                        // Deduplicate images by path while preserving order
-                        let deduplicatedImages: [(path: String, percent: Double)] = {
-                            var seen = Set<String>()
-                            var uniqueArr = [(path: String, percent: Double)]()
-                            for image in images {
-                                if !seen.contains(image.path) {
-                                    seen.insert(image.path)
-                                    uniqueArr.append(image)
-                                }
-                            }
-                            guard let first = uniqueArr.first else { return uniqueArr }
-                            let sortedRest = uniqueArr.dropFirst().sorted { a, b in
-                                let aFolder = URL(fileURLWithPath: a.path).deletingLastPathComponent()
-                                let bFolder = URL(fileURLWithPath: b.path).deletingLastPathComponent()
-                                return naturalSort(aFolder, bFolder)
-                            }
-                            return [first] + sortedRest
-                        }()
-                        let referenceFolder: String = {
-                            guard let first = deduplicatedImages.first else { return "" }
-                            return URL(fileURLWithPath: first.path).deletingLastPathComponent().path
-                        }()
-                        ForEach(Array(deduplicatedImages.enumerated()), id: \.element.path) { index, image in
-                            let folderPath = URL(fileURLWithPath: image.path).deletingLastPathComponent().path
-                            let pathColor: Color = {
-                                if index == 0 {
-                                    return .blue
-                                } else if folderPath != referenceFolder {
-                                    return Color.red
-                                } else {
-                                    return .primary
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Header row
+                        HStack(spacing: 10) {
+                            // Checkbox column (empty header)
+                            Text("")
+                                .frame(width: 20, alignment: .leading)
+                            Text("Path")
+                                .frame(width: 220, alignment: .leading)
+                                .font(.headline)
+                            Text("% Match")
+                                .frame(width: 60, alignment: .leading)
+                                .font(.headline)
+                            Text("Image")
+                                .frame(width: 104, alignment: .leading)
+                                .font(.headline)
+                            Spacer()
+                        }
+                        Divider()
+                        
+                        ForEach(comparisonResults) { result in
+                            // Prepare array of (path: String, percent: Double) for this group
+                            let images: [(path: String, percent: Double)] = {
+                                switch result.type {
+                                case .duplicate(let reference, let duplicates):
+                                    var arr = [(path: String, percent: Double)]()
+                                    arr.append((reference, 1.0))
+                                    for dup in duplicates {
+                                        arr.append((dup.path, dup.percent))
+                                    }
+                                    return arr
+                                case .similar(let reference, let similars):
+                                    var arr = [(path: String, percent: Double)]()
+                                    arr.append((reference, 1.0))
+                                    for sim in similars {
+                                        arr.append((sim.path, sim.percent))
+                                    }
+                                    return arr
                                 }
                             }()
-                            let folderName = URL(fileURLWithPath: image.path).deletingLastPathComponent().lastPathComponent
-                            let fileName = URL(fileURLWithPath: image.path).lastPathComponent
-                            let displayPath = folderName + "/" + fileName
-                            HStack(alignment: .center, spacing: 10) {
-                                if index != 0 {
+                            // Deduplicate images by path while preserving order
+                            let deduplicatedImages: [(path: String, percent: Double)] = {
+                                var seen = Set<String>()
+                                var uniqueArr = [(path: String, percent: Double)]()
+                                for image in images {
+                                    if !seen.contains(image.path) {
+                                        seen.insert(image.path)
+                                        uniqueArr.append(image)
+                                    }
+                                }
+                                guard let first = uniqueArr.first else { return uniqueArr }
+                                let sortedRest = uniqueArr.dropFirst().sorted { a, b in
+                                    let aFolder = URL(fileURLWithPath: a.path).deletingLastPathComponent()
+                                    let bFolder = URL(fileURLWithPath: b.path).deletingLastPathComponent()
+                                    return naturalSort(aFolder, bFolder)
+                                }
+                                return [first] + sortedRest
+                            }()
+                            
+                            let reference = deduplicatedImages.first!
+                            let referenceFolder = URL(fileURLWithPath: reference.path).deletingLastPathComponent().path
+                            
+                            Group {
+                                // Reference image row, now with a checkbox toggle to select for deletion
+                                HStack(spacing: 10) {
                                     Toggle(isOn: Binding(
-                                        get: { selectedForDeletion.contains(image.path) },
+                                        get: { selectedForDeletion.contains(reference.path) },
                                         set: { checked in
-                                            if checked { selectedForDeletion.insert(image.path) }
-                                            else { selectedForDeletion.remove(image.path) }
+                                            if checked { selectedForDeletion.insert(reference.path) }
+                                            else { selectedForDeletion.remove(reference.path) }
                                         }
                                     )) {
                                         EmptyView()
                                     }
                                     .toggleStyle(.checkbox)
-                                    .frame(width: 20)
-                                }
-                                Image(nsImage: ImageAnalyzer.loadThumbnail(for: image.path))
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: 96, height: 96)
-                                    .cornerRadius(6)
-                                if index == 0 {
+                                    .frame(width: 20, alignment: .leading)
+                                    
+                                    let folderName = URL(fileURLWithPath: reference.path).deletingLastPathComponent().lastPathComponent
+                                    let fileName = URL(fileURLWithPath: reference.path).lastPathComponent
+                                    let displayPath = folderName + "/" + fileName
+                                    
                                     Text(displayPath)
                                         .font(.caption)
-                                        .foregroundColor(pathColor)
+                                        .foregroundColor(.blue)
                                         .lineLimit(2)
                                         .truncationMode(.middle)
-                                } else {
-                                    Text(displayPath)
-                                        .font(.caption)
-                                        .foregroundColor(pathColor)
-                                        .lineLimit(2)
-                                        .truncationMode(.middle)
-                                    Text("\(String(format: "%.0f", image.percent * 100))% match")
+                                        .frame(width: 220, alignment: .leading)
+                                    
+                                    Text("100%")
                                         .font(.caption)
                                         .foregroundColor(.primary)
-
+                                        .frame(width: 60, alignment: .leading)
+                                    
+                                    Image(nsImage: ImageAnalyzer.loadThumbnail(for: reference.path))
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: 96, height: 96)
+                                        .cornerRadius(6)
+                                        .frame(width: 104, alignment: .leading)
+                                    
+                                    Spacer()
+                                }
+                                
+                                // Matches rows
+                                ForEach(deduplicatedImages.dropFirst(), id: \.path) { image in
+                                    let folderPath = URL(fileURLWithPath: image.path).deletingLastPathComponent().path
+                                    let pathColor: Color = folderPath != referenceFolder ? .red : .primary
+                                    
+                                    HStack(spacing: 10) {
+                                        Toggle(isOn: Binding(
+                                            get: { selectedForDeletion.contains(image.path) },
+                                            set: { checked in
+                                                if checked { selectedForDeletion.insert(image.path) }
+                                                else { selectedForDeletion.remove(image.path) }
+                                            }
+                                        )) {
+                                            EmptyView()
+                                        }
+                                        .toggleStyle(.checkbox)
+                                        .frame(width: 20, alignment: .leading)
+                                        
+                                        let folderName = URL(fileURLWithPath: image.path).deletingLastPathComponent().lastPathComponent
+                                        let fileName = URL(fileURLWithPath: image.path).lastPathComponent
+                                        let displayPath = folderName + "/" + fileName
+                                        
+                                        Text(displayPath)
+                                            .font(.caption)
+                                            .foregroundColor(pathColor)
+                                            .lineLimit(2)
+                                            .truncationMode(.middle)
+                                            .frame(width: 220, alignment: .leading)
+                                        
+                                        Text("\(String(format: "%.0f", image.percent * 100))%")
+                                            .font(.caption)
+                                            .foregroundColor(.primary)
+                                            .frame(width: 60, alignment: .leading)
+                                        
+                                        Image(nsImage: ImageAnalyzer.loadThumbnail(for: image.path))
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 96, height: 96)
+                                            .cornerRadius(6)
+                                            .frame(width: 104, alignment: .leading)
+                                        
+                                        Spacer()
+                                    }
                                 }
                             }
+                            .padding(.vertical, 4)
+                            Divider()
                         }
                     }
-                    .padding(.vertical, 4)
                 }
-                .frame(minHeight: 150)
+                .frame(maxHeight: .infinity)
+                .layoutPriority(1)
             }
-            Spacer()
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .padding(32)
         .frame(minWidth: 600, minHeight: 480)
     }
@@ -391,3 +447,4 @@ private extension ImageComparisonResult {
         }
     }
 }
+
