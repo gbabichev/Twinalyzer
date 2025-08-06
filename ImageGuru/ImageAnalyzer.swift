@@ -9,7 +9,7 @@ struct ImageComparisonResult: Identifiable {
     let type: ResultType
     enum ResultType {
         case duplicate(reference: String, duplicates: [(path: String, percent: Double)])
-        case similar([String])
+        case similar(reference: String, similars: [(path: String, percent: Double)])
     }
 }
 
@@ -148,8 +148,22 @@ struct ImageAnalyzer {
             }
             // Similars
             for group in similars {
-                let paths = group.map { hashes[$0].url.path }
-                results.append(ImageComparisonResult(type: .similar(paths)))
+                let referenceIdx = group[0]
+                let referencePath = hashes[referenceIdx].url.path
+                let referenceHash = hashes[referenceIdx].hash
+                var similarsArray: [(path: String, percent: Double)] = []
+                for idx in group {
+                    let path = hashes[idx].url.path
+                    let percent: Double
+                    if idx == referenceIdx {
+                        percent = 1.0
+                    } else {
+                        let dist = hammingDistance(referenceHash, hashes[idx].hash)
+                        percent = 1.0 - Double(dist) / 64.0
+                    }
+                    similarsArray.append((path: path, percent: percent))
+                }
+                results.append(ImageComparisonResult(type: .similar(reference: referencePath, similars: similarsArray)))
             }
             DispatchQueue.main.async {
                 completion(results)
@@ -157,3 +171,4 @@ struct ImageAnalyzer {
         }
     }
 }
+

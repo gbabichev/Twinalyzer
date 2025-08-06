@@ -17,9 +17,9 @@ struct ContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("ImageGuru: Duplicate & Similar Photo Finder")
-                .font(.title)
-                .padding(.bottom, 10)
+//            Text("ImageGuru: Duplicate & Similar Photo Finder")
+//                .font(.title)
+//                .padding(.bottom, 10)
 
             Button("Select Folders of Images") {
                 selectFolders()
@@ -63,47 +63,56 @@ struct ContentView: View {
             } else {
                 List(comparisonResults) { result in
                     VStack(alignment: .leading, spacing: 4) {
-                        switch result.type {
-                        case .duplicate(let reference, let duplicates):
-                            Text("Duplicate:").bold()
-                            // Show the reference image first, labeled
+                        // Prepare array of (path, percent) for this group
+                        let images: [(path: String, percent: Double)] = {
+                            switch result.type {
+                            case .duplicate(let reference, let duplicates):
+                                var arr = [(path: String, percent: Double)]()
+                                arr.append((reference, 1.0))
+                                for dup in duplicates {
+                                    arr.append((dup.path, dup.percent))
+                                }
+                                return arr
+                            case .similar(let reference, let similars):
+                                var arr = [(path: String, percent: Double)]()
+                                arr.append((reference, 1.0))
+                                for sim in similars {
+                                    arr.append((sim.path, sim.percent))
+                                }
+                                return arr
+                            }
+                        }()
+                        // Deduplicate images by path while preserving order
+                        let deduplicatedImages: [(path: String, percent: Double)] = {
+                            var seen = Set<String>()
+                            var uniqueArr = [(path: String, percent: Double)]()
+                            for image in images {
+                                if !seen.contains(image.path) {
+                                    seen.insert(image.path)
+                                    uniqueArr.append(image)
+                                }
+                            }
+                            return uniqueArr
+                        }()
+                        ForEach(Array(deduplicatedImages.enumerated()), id: \.element.path) { index, image in
                             HStack(alignment: .center, spacing: 10) {
-                                Image(nsImage: ImageAnalyzer.loadThumbnail(for: reference))
+                                Image(nsImage: ImageAnalyzer.loadThumbnail(for: image.path))
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(width: 48, height: 48)
+                                    .frame(width: 96, height: 96)
                                     .cornerRadius(6)
-                                Text("Reference: \(reference)")
-                                    .font(.caption)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(2)
-                                    .truncationMode(.middle)
-                            }
-                            // Now show the duplicates, labeled
-                            ForEach(duplicates, id: \.path) { dup in
-                                HStack(alignment: .center, spacing: 10) {
-                                    Image(nsImage: ImageAnalyzer.loadThumbnail(for: dup.path))
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 48, height: 48)
-                                        .cornerRadius(6)
-                                    Text("Duplicate: \(dup.path) (\(String(format: "%.0f", dup.percent * 100))% match)")
+                                if index == 0 {
+                                    Text(image.path)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(2)
                                         .truncationMode(.middle)
-                                }
-                            }
-                        case .similar(let imagePaths):
-                            Text("Similar:").bold()
-                            ForEach(imagePaths, id: \.self) { path in
-                                HStack(alignment: .center, spacing: 10) {
-                                    Image(nsImage: ImageAnalyzer.loadThumbnail(for: path))
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 48, height: 48)
-                                        .cornerRadius(6)
-                                    Text(path)
+                                        .foregroundStyle(.blue)
+                                } else {
+                                    Text("\(String(format: "%.0f", image.percent * 100))% match")
+                                        .font(.caption)
+                                        .foregroundStyle(.primary)
+                                    Text(image.path)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(2)
@@ -144,3 +153,4 @@ struct ContentView: View {
         }
     }
 }
+
