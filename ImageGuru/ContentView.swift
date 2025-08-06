@@ -156,8 +156,10 @@ struct ContentView: View {
                             let pathColor: Color = {
                                 if index == 0 {
                                     return .blue
-                                } else {
+                                } else if folderPath != referenceFolder {
                                     return Color.red
+                                } else {
+                                    return .primary
                                 }
                             }()
                             let folderName = URL(fileURLWithPath: image.path).deletingLastPathComponent().lastPathComponent
