@@ -28,6 +28,12 @@ struct ImageAnalyzer {
         }
         return urls
     }
+    
+    static func topLevelImageFiles(in directory: URL) -> [URL] {
+        let fileManager = FileManager.default
+        guard let files = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return [] }
+        return files.filter { supportedExtensions.contains($0.pathExtension.lowercased()) }
+    }
 
     static func averageHash(for imageURL: URL) -> UInt64? {
         guard let nsImage = NSImage(contentsOf: imageURL),
@@ -91,84 +97,108 @@ struct ImageAnalyzer {
     static func analyzeImages(
         inFolders folders: [URL],
         similarityThreshold: Double,
+        topLevelOnly: Bool,
         completion: @escaping ([ImageComparisonResult]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            var imageFiles: [URL] = []
-            for folderURL in folders {
-                imageFiles.append(contentsOf: allImageFiles(in: folderURL))
-            }
-            var hashes: [(url: URL, hash: UInt64)] = []
-            for url in imageFiles {
-                if let hash = averageHash(for: url) {
-                    hashes.append((url, hash))
-                }
-            }
-            // Pairwise comparison
-            var duplicates: [[Int]] = [] // Groups of indices into hashes
-            var similars: [[Int]] = []
-            var used = Set<Int>()
-            let maxDist = Int((1.0 - similarityThreshold) * 64.0) // e.g., threshold 0.8 -> maxDist = 12
-            for i in 0..<hashes.count {
-                guard !used.contains(i) else { continue }
-                var dupGroup: [Int] = [i]
-                var simGroup: [Int] = []
-                for j in (i+1)..<hashes.count {
-                    let dist = hammingDistance(hashes[i].hash, hashes[j].hash)
-                    if dist == 0 {
-                        dupGroup.append(j)
-                        used.insert(j)
-                    } else if dist <= maxDist {
-                        simGroup.append(j)
+
+            func analyzeHashes(_ hashes: [(url: URL, hash: UInt64)]) -> [ImageComparisonResult] {
+                var duplicates: [[Int]] = [] // Groups of indices into hashes
+                var similars: [[Int]] = []
+                var used = Set<Int>()
+                let maxDist = Int((1.0 - similarityThreshold) * 64.0) // e.g., threshold 0.8 -> maxDist = 12
+                for i in 0..<hashes.count {
+                    guard !used.contains(i) else { continue }
+                    var dupGroup: [Int] = [i]
+                    var simGroup: [Int] = []
+                    for j in (i+1)..<hashes.count {
+                        let dist = hammingDistance(hashes[i].hash, hashes[j].hash)
+                        if dist == 0 {
+                            dupGroup.append(j)
+                            used.insert(j)
+                        } else if dist <= maxDist {
+                            simGroup.append(j)
+                        }
                     }
+                    if dupGroup.count > 1 {
+                        duplicates.append(dupGroup)
+                    } else if !simGroup.isEmpty {
+                        similars.append([i] + simGroup)
+                    }
+                    used.insert(i)
                 }
-                if dupGroup.count > 1 {
-                    duplicates.append(dupGroup)
-                } else if !simGroup.isEmpty {
-                    similars.append([i] + simGroup)
+                var results: [ImageComparisonResult] = []
+                // Duplicates
+                for group in duplicates {
+                    let referenceIdx = group[0]
+                    let referencePath = hashes[referenceIdx].url.path
+                    let referenceHash = hashes[referenceIdx].hash
+                    var dups: [(path: String, percent: Double)] = []
+                    for dupIdx in group.dropFirst() {
+                        let dupPath = hashes[dupIdx].url.path
+                        let dupHash = hashes[dupIdx].hash
+                        let dist = hammingDistance(referenceHash, dupHash)
+                        // 100% match if identical, less if very close
+                        let percent = 1.0 - Double(dist) / 64.0
+                        dups.append((path: dupPath, percent: percent))
+                    }
+                    results.append(ImageComparisonResult(type: .duplicate(reference: referencePath, duplicates: dups)))
                 }
-                used.insert(i)
+                // Similars
+                for group in similars {
+                    let referenceIdx = group[0]
+                    let referencePath = hashes[referenceIdx].url.path
+                    let referenceHash = hashes[referenceIdx].hash
+                    var similarsArray: [(path: String, percent: Double)] = []
+                    for idx in group {
+                        let path = hashes[idx].url.path
+                        let percent: Double
+                        if idx == referenceIdx {
+                            percent = 1.0
+                        } else {
+                            let dist = hammingDistance(referenceHash, hashes[idx].hash)
+                            percent = 1.0 - Double(dist) / 64.0
+                        }
+                        similarsArray.append((path: path, percent: percent))
+                    }
+                    results.append(ImageComparisonResult(type: .similar(reference: referencePath, similars: similarsArray)))
+                }
+                return results
             }
+
             var results: [ImageComparisonResult] = []
-            // Duplicates
-            for group in duplicates {
-                let referenceIdx = group[0]
-                let referencePath = hashes[referenceIdx].url.path
-                let referenceHash = hashes[referenceIdx].hash
-                var dups: [(path: String, percent: Double)] = []
-                for dupIdx in group.dropFirst() {
-                    let dupPath = hashes[dupIdx].url.path
-                    let dupHash = hashes[dupIdx].hash
-                    let dist = hammingDistance(referenceHash, dupHash)
-                    // 100% match if identical, less if very close
-                    let percent = 1.0 - Double(dist) / 64.0
-                    dups.append((path: dupPath, percent: percent))
-                }
-                results.append(ImageComparisonResult(type: .duplicate(reference: referencePath, duplicates: dups)))
-            }
-            // Similars
-            for group in similars {
-                let referenceIdx = group[0]
-                let referencePath = hashes[referenceIdx].url.path
-                let referenceHash = hashes[referenceIdx].hash
-                var similarsArray: [(path: String, percent: Double)] = []
-                for idx in group {
-                    let path = hashes[idx].url.path
-                    let percent: Double
-                    if idx == referenceIdx {
-                        percent = 1.0
-                    } else {
-                        let dist = hammingDistance(referenceHash, hashes[idx].hash)
-                        percent = 1.0 - Double(dist) / 64.0
+
+            if topLevelOnly {
+                // Analyze each folder separately without mixing hashes
+                for folderURL in folders {
+                    let imageFiles = topLevelImageFiles(in: folderURL)
+                    var hashes: [(url: URL, hash: UInt64)] = []
+                    for url in imageFiles {
+                        if let hash = averageHash(for: url) {
+                            hashes.append((url, hash))
+                        }
                     }
-                    similarsArray.append((path: path, percent: percent))
+                    let folderResults = analyzeHashes(hashes)
+                    results.append(contentsOf: folderResults)
                 }
-                results.append(ImageComparisonResult(type: .similar(reference: referencePath, similars: similarsArray)))
+            } else {
+                // Original logic: scan all folders recursively and analyze combined
+                var imageFiles: [URL] = []
+                for folderURL in folders {
+                    imageFiles.append(contentsOf: allImageFiles(in: folderURL))
+                }
+                var hashes: [(url: URL, hash: UInt64)] = []
+                for url in imageFiles {
+                    if let hash = averageHash(for: url) {
+                        hashes.append((url, hash))
+                    }
+                }
+                results = analyzeHashes(hashes)
             }
+
             DispatchQueue.main.async {
                 completion(results)
             }
         }
     }
 }
-

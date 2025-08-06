@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var isProcessing: Bool = false
     @State private var selectedForDeletion: Set<String> = []
     @State private var selectAllActive: Bool = false
+    @State private var scanTopLevelOnly: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -28,6 +29,10 @@ struct ContentView: View {
             }
             .help("Choose folders containing images to analyze")
             .padding(.bottom, 2)
+            
+            Toggle("Limit scan to selected folders only", isOn: $scanTopLevelOnly)
+                .toggleStyle(.checkbox)
+                .help("When checked, only scans images directly inside each selected folder (no subfolders and no cross-folder matches). Uncheck to scan recursively as before.")
 
             if selectedFolderURLs.isEmpty {
                 Text("No folders selected.")
@@ -212,16 +217,45 @@ struct ContentView: View {
         panel.allowsMultipleSelection = true
         panel.title = "Select folders with images"
         if panel.runModal() == .OK {
-            selectedFolderURLs = panel.urls
+            if panel.urls.count == 1 {
+                // User selected a single root folder. Use all its immediate subfolders
+                let rootURL = panel.urls[0]
+                let fileManager = FileManager.default
+                if let subfolders = try? fileManager.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                    let folderURLs = subfolders.filter { url in
+                        var isDir: ObjCBool = false
+                        return fileManager.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+                    }
+                    selectedFolderURLs = folderURLs
+                } else {
+                    selectedFolderURLs = []
+                }
+            } else {
+                selectedFolderURLs = panel.urls
+            }
             comparisonResults = []
         }
     }
 
     private func processImages() {
         guard !selectedFolderURLs.isEmpty else { return }
+        print("--- Diagnostic Start ---")
+        print("Selected Folders:", selectedFolderURLs)
+        print("Similarity Threshold:", similarityThreshold)
+        print("Top Level Only:", scanTopLevelOnly)
         isProcessing = true
         comparisonResults = []
-        ImageAnalyzer.analyzeImages(inFolders: selectedFolderURLs, similarityThreshold: similarityThreshold) { results in
+        ImageAnalyzer.analyzeImages(inFolders: selectedFolderURLs, similarityThreshold: similarityThreshold, topLevelOnly: scanTopLevelOnly) { results in
+            print("Analysis Complete. Results count:", results.count)
+            for (i, r) in results.enumerated() {
+                switch r.type {
+                case .duplicate(let reference, let duplicates):
+                    print("[Result \(i)] DUPLICATE group. Reference:", reference, "Duplicates:", duplicates)
+                case .similar(let reference, let similars):
+                    print("[Result \(i)] SIMILAR group. Reference:", reference, "Similars:", similars)
+                }
+            }
+            print("--- Diagnostic End ---")
             self.comparisonResults = results
             self.isProcessing = false
         }
