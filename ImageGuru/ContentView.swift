@@ -27,18 +27,20 @@ struct ContentView: View {
             Button("Select Folders of Images") {
                 selectFolders()
             }
-            .help("Choose folders containing images to analyze")
+            .help("Choose any number of folders at any depth containing images to analyze")
             .padding(.bottom, 2)
             
             Toggle("Limit scan to selected folders only", isOn: $scanTopLevelOnly)
                 .toggleStyle(.checkbox)
-                .help("When checked, only scans images directly inside each selected folder (no subfolders and no cross-folder matches). Uncheck to scan recursively as before.")
+                .help("Only the lowest-level (leaf) subfolders you selected are ever scanned. This toggle affects grouping or combining results, but never which folders are scanned.")
 
             if selectedFolderURLs.isEmpty {
                 Text("No folders selected.")
                     .foregroundStyle(.secondary)
             } else {
-                Text("Selected Folders: " + selectedFolderURLs.map { $0.lastPathComponent }.joined(separator: ", "))
+                // Always display only leaf folders (lowest-level folders without subfolders)
+                let foldersToDisplay: [URL] = findLeafFolders(from: selectedFolderURLs)
+                Text("Folders to Scan: " + foldersToDisplay.map { $0.lastPathComponent }.joined(separator: ", "))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -210,6 +212,74 @@ struct ContentView: View {
         .frame(minWidth: 600, minHeight: 480)
     }
 
+    /// Recursively collects all folders starting from the given list of URLs.
+    /// Returns an array of folder URLs including the original ones and all their subfolders.
+    private func collectAllFolders(from urls: [URL]) -> [URL] {
+        var allFolders: [URL] = []
+        let fileManager = FileManager.default
+        
+        func recurse(url: URL) {
+            allFolders.append(url)
+            if let contents = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                for item in contents {
+                    if (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                        recurse(url: item)
+                    }
+                }
+            }
+        }
+        
+        for url in urls {
+            recurse(url: url)
+        }
+        
+        return allFolders
+    }
+    
+    /// Recursively finds all leaf folders (folders without subfolders) starting from the given list.
+    /// For each input folder:
+    /// - If it contains any subfolders, the folder itself is NOT included in the output.
+    ///   Only its leaf subfolders (folders without subfolders) are included.
+    /// - If it has no subfolders, it is considered a leaf folder and included.
+    /// - If the folder cannot be read (e.g. permissions error), it is considered a leaf folder.
+    /// - This ensures that even if a user selects a root folder, it is not included if it has any subfolders.
+    /// - Each leaf folder is added only once (no duplicates).
+    private func findLeafFolders(from urls: [URL]) -> [URL] {
+        let fileManager = FileManager.default
+        var leafFoldersSet = Set<URL>()
+        var leafFolders: [URL] = []
+        
+        func recurse(url: URL) {
+            if let contents = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                let subfolders = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+                if subfolders.isEmpty {
+                    // No subfolders, this is a leaf folder
+                    if !leafFoldersSet.contains(url) {
+                        leafFoldersSet.insert(url)
+                        leafFolders.append(url)
+                    }
+                } else {
+                    // Folder has subfolders, do NOT add this folder, recurse into subfolders
+                    for subfolder in subfolders {
+                        recurse(url: subfolder)
+                    }
+                }
+            } else {
+                // If cannot read contents, consider this a leaf
+                if !leafFoldersSet.contains(url) {
+                    leafFoldersSet.insert(url)
+                    leafFolders.append(url)
+                }
+            }
+        }
+        
+        for url in urls {
+            recurse(url: url)
+        }
+        
+        return leafFolders
+    }
+
     private func selectFolders() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -217,22 +287,8 @@ struct ContentView: View {
         panel.allowsMultipleSelection = true
         panel.title = "Select folders with images"
         if panel.runModal() == .OK {
-            if panel.urls.count == 1 {
-                // User selected a single root folder. Use all its immediate subfolders
-                let rootURL = panel.urls[0]
-                let fileManager = FileManager.default
-                if let subfolders = try? fileManager.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-                    let folderURLs = subfolders.filter { url in
-                        var isDir: ObjCBool = false
-                        return fileManager.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
-                    }
-                    selectedFolderURLs = folderURLs
-                } else {
-                    selectedFolderURLs = []
-                }
-            } else {
-                selectedFolderURLs = panel.urls
-            }
+            // Always use exactly the selected folders, without expanding single root folder to its subfolders
+            selectedFolderURLs = panel.urls
             comparisonResults = []
         }
     }
@@ -245,7 +301,10 @@ struct ContentView: View {
         print("Top Level Only:", scanTopLevelOnly)
         isProcessing = true
         comparisonResults = []
-        ImageAnalyzer.analyzeImages(inFolders: selectedFolderURLs, similarityThreshold: similarityThreshold, topLevelOnly: scanTopLevelOnly) { results in
+        
+        // Always analyze images in leaf folders (folders without subfolders)
+        let leafFolders = findLeafFolders(from: selectedFolderURLs)
+        ImageAnalyzer.analyzeImages(inFolders: leafFolders, similarityThreshold: similarityThreshold, topLevelOnly: scanTopLevelOnly) { results in
             print("Analysis Complete. Results count:", results.count)
             for (i, r) in results.enumerated() {
                 switch r.type {
