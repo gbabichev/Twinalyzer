@@ -11,7 +11,7 @@ import AVFoundation
 
 struct ContentView: View {
     @State private var selectedFolderURLs: [URL] = []
-    @State private var similarityThreshold: Double = 0.85
+    @State private var similarityThreshold: Double = 0.95
     @State private var comparisonResults: [ImageComparisonResult] = []
     @State private var isProcessing: Bool = false
     @State private var selectedForDeletion: Set<String> = []
@@ -48,7 +48,7 @@ struct ContentView: View {
                 }
 
                 HStack {
-                    Slider(value: $similarityThreshold, in: 0.5...1.0, step: 0.01) {
+                    Slider(value: $similarityThreshold, in: 0.7...1.0, step: 0.01) {
                         Text("Similarity Threshold")
                     }
                     Text(String(format: "%.2f", similarityThreshold))

@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import Accelerate
 
 // This file is needed by ContentView.swift and should be included in the main target.
 
@@ -35,42 +36,81 @@ struct ImageAnalyzer {
         return files.filter { supportedExtensions.contains($0.pathExtension.lowercased()) }
     }
 
-    static func averageHash(for imageURL: URL) -> UInt64? {
+    static func blockHash(for imageURL: URL) -> UInt64? {
         guard let nsImage = NSImage(contentsOf: imageURL),
               let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        let size = CGSize(width: 8, height: 8)
+
+        let gridSize = 8
+        let width = gridSize
+        let height = gridSize
+
         guard let context = CGContext(
             data: nil,
-            width: Int(size.width),
-            height: Int(size.height),
+            width: width,
+            height: height,
             bitsPerComponent: 8,
-            bytesPerRow: 8 * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
         ) else { return nil }
+
         context.interpolationQuality = .low
-        context.draw(cgImage, in: CGRect(origin: .zero, size: size))
-        guard let pixelData = context.data else { return nil }
-        let ptr = pixelData.bindMemory(to: UInt8.self, capacity: 8*8*4)
-        var total: UInt64 = 0
-        var pixels: [UInt8] = []
-        for i in 0..<64 {
-            let offset = i * 4
-            let r = ptr[offset]
-            let g = ptr[offset+1]
-            let b = ptr[offset+2]
-            // Use luminance
-            let lum = UInt8(0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b))
-            pixels.append(lum)
-            total += UInt64(lum)
-        }
-        let avg = total / 64
+        context.draw(cgImage, in: CGRect(origin: .zero, size: CGSize(width: width, height: height)))
+
+        guard let pixelBuffer = context.data else { return nil }
+        let bufferPointer = pixelBuffer.bindMemory(to: UInt8.self, capacity: width * height)
+        let pixels = (0..<(width * height)).map { bufferPointer[$0] }
+
+        let total = pixels.reduce(0) { $0 + Int($1) }
+        let avg = total / pixels.count
+
         var hash: UInt64 = 0
-        for (i, p) in pixels.enumerated() {
-            if p >= avg { hash |= (1 << UInt64(63-i)) }
+        for (i, pixel) in pixels.enumerated() {
+            if Int(pixel) >= avg {
+                hash |= (1 << (63 - i))
+            }
         }
+
         return hash
     }
+    
+    // Not used
+//    static func averageHash(for imageURL: URL) -> UInt64? {
+//        guard let nsImage = NSImage(contentsOf: imageURL),
+//              let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+//        let size = CGSize(width: 8, height: 8)
+//        guard let context = CGContext(
+//            data: nil,
+//            width: Int(size.width),
+//            height: Int(size.height),
+//            bitsPerComponent: 8,
+//            bytesPerRow: 8 * 4,
+//            space: CGColorSpaceCreateDeviceRGB(),
+//            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+//        ) else { return nil }
+//        context.interpolationQuality = .low
+//        context.draw(cgImage, in: CGRect(origin: .zero, size: size))
+//        guard let pixelData = context.data else { return nil }
+//        let ptr = pixelData.bindMemory(to: UInt8.self, capacity: 8*8*4)
+//        var total: UInt64 = 0
+//        var pixels: [UInt8] = []
+//        for i in 0..<64 {
+//            let offset = i * 4
+//            let r = ptr[offset]
+//            let g = ptr[offset+1]
+//            let b = ptr[offset+2]
+//            // Use luminance
+//            let lum = UInt8(0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b))
+//            pixels.append(lum)
+//            total += UInt64(lum)
+//        }
+//        let avg = total / 64
+//        var hash: UInt64 = 0
+//        for (i, p) in pixels.enumerated() {
+//            if p >= avg { hash |= (1 << UInt64(63-i)) }
+//        }
+//        return hash
+//    }
 
     static func hammingDistance(_ a: UInt64, _ b: UInt64) -> Int {
         (a ^ b).nonzeroBitCount
@@ -180,7 +220,8 @@ struct ImageAnalyzer {
                     let imageFiles = topLevelImageFiles(in: folderURL)
                     var hashes: [(url: URL, hash: UInt64)] = []
                     for url in imageFiles {
-                        if let hash = averageHash(for: url) {
+                        //if let hash = averageHash(for: url) {
+                        if let hash = blockHash(for: url) {
                             hashes.append((url, hash))
                         }
                         imagesProcessed += 1
@@ -199,7 +240,8 @@ struct ImageAnalyzer {
                 let total = imageFiles.count
                 var processed = 0
                 for url in imageFiles {
-                    if let hash = averageHash(for: url) {
+                    //if let hash = averageHash(for: url) {
+                    if let hash = blockHash(for: url) {
                         hashes.append((url, hash))
                     }
                     processed += 1
@@ -208,8 +250,8 @@ struct ImageAnalyzer {
                 results = analyzeHashes(hashes)
             }
 
-            progress?(1.0)
             DispatchQueue.main.async {
+                progress?(1.0)
                 completion(results)
             }
         }
