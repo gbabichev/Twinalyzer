@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Analysis Modes
 enum AnalysisMode: String, CaseIterable, Identifiable {
     case perceptualHash = "Perceptual Hash"
     case deepFeature = "Deep Feature Embedding"
@@ -9,7 +8,6 @@ enum AnalysisMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-// MARK: - Main View
 struct ContentView: View {
     @State private var selectedFolderURLs: [URL] = []
     @State private var similarityThreshold: Double = 0.2
@@ -40,13 +38,12 @@ struct ContentView: View {
     private var selectedRow: TableRow? {
         flattenedResults.first(where: { $0.id == selectedRowID })
     }
-    
+
     private var selectedMatches: [String] {
         flattenedResults
             .filter { selectedRowIDs.contains($0.id) }
             .map { $0.similar }
     }
-
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -61,14 +58,13 @@ struct ContentView: View {
                 Text("No folders selected.")
                     .foregroundStyle(.secondary)
             } else {
-                // Always display only leaf folders (lowest-level folders without subfolders)
                 let foldersToDisplay: [URL] = findLeafFolders(from: selectedFolderURLs)
                 Text("Folders to Scan: " + foldersToDisplay.map { $0.lastPathComponent }.joined(separator: ", "))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
-            
+
             Picker("Analysis Mode", selection: $selectedAnalysisMode) {
                 ForEach(AnalysisMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)
@@ -78,8 +74,10 @@ struct ContentView: View {
 
             HStack {
                 Text("Similarity Threshold")
-                Slider(value: $similarityThreshold, in: 0.7...1.0, step: 0.01)
-                Text(String(format: "%.2f", similarityThreshold))
+                Slider(value: $similarityThreshold, in: 0.1...1.0, step: 0.01)
+                Text(String(format: "%.0f%% (%@)", similarityThreshold * 100, sliderLabel(for: similarityThreshold)))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Button(action: processImages) {
@@ -106,7 +104,6 @@ struct ContentView: View {
                 }
             }
 
-            
             Divider()
 
             if comparisonResults.isEmpty {
@@ -180,10 +177,9 @@ struct ContentView: View {
         .frame(minWidth: 700, minHeight: 500)
         .onAppear {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                if event.keyCode == 49, // spacebar
+                if event.keyCode == 49,
                    NSApp.keyWindow?.firstResponder is NSTableView {
                     toggleSelectedRow()
-
                     DispatchQueue.main.async {
                         if let contentView = NSApp.keyWindow?.contentView,
                            let tableView = findTableView(in: contentView) {
@@ -203,7 +199,6 @@ struct ContentView: View {
         return refFolder != matchFolder
     }
 
-    
     private func deleteSelectedMatches() {
         for path in selectedMatches {
             try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
@@ -217,7 +212,6 @@ struct ContentView: View {
         toggleVersion += 1
     }
 
-    
     private func selectFolders() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -239,6 +233,7 @@ struct ContentView: View {
         selectedRowIDs = []
 
         let folders = findLeafFolders(from: selectedFolderURLs)
+        let similarityScoreThreshold = similarityThreshold
 
         let onComplete: ([ImageComparisonResult]) -> Void = { results in
             DispatchQueue.main.async {
@@ -252,7 +247,7 @@ struct ContentView: View {
         case .perceptualHash:
             ImageAnalyzer.analyzeImages(
                 inFolders: folders,
-                similarityThreshold: similarityThreshold,
+                similarityThreshold: similarityScoreThreshold,
                 topLevelOnly: scanTopLevelOnly,
                 progress: { self.processingProgress = $0 },
                 completion: onComplete
@@ -261,7 +256,7 @@ struct ContentView: View {
         case .deepFeature:
             ImageAnalyzer.analyzeWithDeepFeatures(
                 inFolders: folders,
-                threshold: Float(1.0 - similarityThreshold),
+                similarityThreshold: similarityScoreThreshold,
                 topLevelOnly: scanTopLevelOnly,
                 progress: { self.processingProgress = $0 },
                 completion: onComplete
@@ -329,16 +324,23 @@ struct ContentView: View {
         }
     }
 
-
     private func deleteFile(at path: String) {
         try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
         comparisonResults.removeAll { $0.reference == path || $0.similars.contains(where: { $0.path == path }) }
         selectedRowIDs.remove(path)
         toggleVersion += 1
     }
+
+    private func sliderLabel(for value: Double) -> String {
+        switch value {
+        case ..<0.3: return "Loose"
+        case ..<0.6: return "Moderate"
+        case ..<0.85: return "Strict"
+        default: return "Exact"
+        }
+    }
 }
 
-// MARK: - AppKit Helper
 func findTableView(in view: NSView?) -> NSTableView? {
     guard let view else { return nil }
     if let table = view as? NSTableView { return table }
