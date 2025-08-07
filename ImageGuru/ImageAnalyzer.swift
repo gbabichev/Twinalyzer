@@ -2,16 +2,19 @@ import AppKit
 import AVFoundation
 import Foundation
 import Accelerate
+import Vision
+import CoreImage
 
 // This file is needed by ContentView.swift and should be included in the main target.
 
+/// Represents a group of similar images.
+/// - `reference`: The reference image path.
+/// - `similars`: Array of tuples with image paths and their similarity percentages.
+/// Note: This struct no longer distinguishes duplicates; duplicates are treated as similars with 100% similarity.
 struct ImageComparisonResult: Identifiable {
     let id = UUID()
-    let type: ResultType
-    enum ResultType {
-        case duplicate(reference: String, duplicates: [(path: String, percent: Double)])
-        case similar(reference: String, similars: [(path: String, percent: Double)])
-    }
+    let reference: String
+    let similars: [(path: String, percent: Double)]
 }
 
 struct ImageAnalyzer {
@@ -34,6 +37,103 @@ struct ImageAnalyzer {
         let fileManager = FileManager.default
         guard let files = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return [] }
         return files.filter { supportedExtensions.contains($0.pathExtension.lowercased()) }
+    }
+
+    static func subjectBlockHash(for imageURL: URL) -> UInt64? {
+        guard let nsImage = NSImage(contentsOf: imageURL),
+              let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        //let request = VNDetectHumanRectanglesRequest()
+        let request = VNDetectHumanBodyPoseRequest()
+        
+        do {
+            try handler.perform([request])
+            let observations = request.results ?? []
+            print(imageURL)
+            guard let observation = observations.first else {
+                // no person
+                print("NO PERSON")
+                return blockHash(for: imageURL)
+            }
+            print("here?")
+            let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+            guard let recognizedPoints = try? observation.recognizedPoints(.all) else {
+                return blockHash(for: imageURL)
+            }
+
+            let validPoints = recognizedPoints.values.filter { $0.confidence > 0.3 }
+            guard !validPoints.isEmpty else {
+                return blockHash(for: imageURL)
+            }
+
+            // Compute bounding box of points in normalized space
+            let xs = validPoints.map { $0.x }
+            let ys = validPoints.map { $0.y }
+
+            let minX = xs.min() ?? 0
+            let maxX = xs.max() ?? 0
+            let minY = ys.min() ?? 0
+            let maxY = ys.max() ?? 0
+
+            let boundingBox = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+
+            // Convert Vision's normalized bounding box to pixel coordinates
+            let rect = CGRect(
+                x: boundingBox.origin.x * imageSize.width,
+                y: (1.0 - boundingBox.origin.y - boundingBox.height) * imageSize.height,
+                width: boundingBox.width * imageSize.width,
+                height: boundingBox.height * imageSize.height
+            ).integral
+
+            guard let cropped = cgImage.cropping(to: rect) else {
+                // Cropping failed — fallback
+                return blockHash(for: imageURL)
+            }
+
+            return blockHash(for: cropped)
+
+        } catch {
+            print("Vision request failed: \(error)")
+            return blockHash(for: imageURL)
+        }
+    }
+
+    static func blockHash(for cgImage: CGImage) -> UInt64? {
+        let gridSize = 8
+        let width = gridSize
+        let height = gridSize
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else { return nil }
+
+        context.interpolationQuality = .low
+        context.draw(cgImage, in: CGRect(origin: .zero, size: CGSize(width: width, height: height)))
+
+        guard let pixelBuffer = context.data else { return nil }
+        let bufferPointer = pixelBuffer.bindMemory(to: UInt8.self, capacity: width * height)
+        let pixels = (0..<(width * height)).map { bufferPointer[$0] }
+
+        let total = pixels.reduce(0) { $0 + Int($1) }
+        let avg = total / pixels.count
+
+        var hash: UInt64 = 0
+        for (i, pixel) in pixels.enumerated() {
+            if Int(pixel) >= avg {
+                hash |= (1 << (63 - i))
+            }
+        }
+
+        return hash
     }
 
     static func blockHash(for imageURL: URL) -> UInt64? {
@@ -144,49 +244,28 @@ struct ImageAnalyzer {
         DispatchQueue.global(qos: .userInitiated).async {
 
             func analyzeHashes(_ hashes: [(url: URL, hash: UInt64)]) -> [ImageComparisonResult] {
-                var duplicates: [[Int]] = [] // Groups of indices into hashes
-                var similars: [[Int]] = []
+                var groups: [[Int]] = [] // Groups of indices into hashes representing similar or duplicates
                 var used = Set<Int>()
                 let maxDist = Int((1.0 - similarityThreshold) * 64.0) // e.g., threshold 0.8 -> maxDist = 12
+
                 for i in 0..<hashes.count {
                     guard !used.contains(i) else { continue }
-                    var dupGroup: [Int] = [i]
-                    var simGroup: [Int] = []
+                    var group: [Int] = [i]
                     for j in (i+1)..<hashes.count {
                         let dist = hammingDistance(hashes[i].hash, hashes[j].hash)
-                        if dist == 0 {
-                            dupGroup.append(j)
+                        if dist <= maxDist {
+                            group.append(j)
                             used.insert(j)
-                        } else if dist <= maxDist {
-                            simGroup.append(j)
                         }
                     }
-                    if dupGroup.count > 1 {
-                        duplicates.append(dupGroup)
-                    } else if !simGroup.isEmpty {
-                        similars.append([i] + simGroup)
-                    }
                     used.insert(i)
-                }
-                var results: [ImageComparisonResult] = []
-                // Duplicates
-                for group in duplicates {
-                    let referenceIdx = group[0]
-                    let referencePath = hashes[referenceIdx].url.path
-                    let referenceHash = hashes[referenceIdx].hash
-                    var dups: [(path: String, percent: Double)] = []
-                    for dupIdx in group.dropFirst() {
-                        let dupPath = hashes[dupIdx].url.path
-                        let dupHash = hashes[dupIdx].hash
-                        let dist = hammingDistance(referenceHash, dupHash)
-                        // 100% match if identical, less if very close
-                        let percent = 1.0 - Double(dist) / 64.0
-                        dups.append((path: dupPath, percent: percent))
+                    if group.count > 1 {
+                        groups.append(group)
                     }
-                    results.append(ImageComparisonResult(type: .duplicate(reference: referencePath, duplicates: dups)))
                 }
-                // Similars
-                for group in similars {
+
+                var results: [ImageComparisonResult] = []
+                for group in groups {
                     let referenceIdx = group[0]
                     let referencePath = hashes[referenceIdx].url.path
                     let referenceHash = hashes[referenceIdx].hash
@@ -202,7 +281,7 @@ struct ImageAnalyzer {
                         }
                         similarsArray.append((path: path, percent: percent))
                     }
-                    results.append(ImageComparisonResult(type: .similar(reference: referencePath, similars: similarsArray)))
+                    results.append(ImageComparisonResult(reference: referencePath, similars: similarsArray))
                 }
                 return results
             }
@@ -220,9 +299,8 @@ struct ImageAnalyzer {
                     let imageFiles = topLevelImageFiles(in: folderURL)
                     var hashes: [(url: URL, hash: UInt64)] = []
                     for url in imageFiles {
-                        //if let hash = averageHash(for: url) {
-                        if let hash = blockHash(for: url) {
-                            hashes.append((url, hash))
+                        if let hash = subjectBlockHash(for: url) {
+                            hashes.append((url: url, hash: hash))
                         }
                         imagesProcessed += 1
                         progress?(Double(imagesProcessed) / Double(totalImages))
@@ -240,9 +318,8 @@ struct ImageAnalyzer {
                 let total = imageFiles.count
                 var processed = 0
                 for url in imageFiles {
-                    //if let hash = averageHash(for: url) {
-                    if let hash = blockHash(for: url) {
-                        hashes.append((url, hash))
+                    if let hash = subjectBlockHash(for: url) {
+                        hashes.append((url: url, hash: hash))
                     }
                     processed += 1
                     progress?(Double(processed) / Double(total))
