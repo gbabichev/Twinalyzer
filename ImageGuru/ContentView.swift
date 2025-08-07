@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Analysis Modes
 enum AnalysisMode: String, CaseIterable, Identifiable {
     case perceptualHash = "Perceptual Hash"
     case deepFeature = "Deep Feature Embedding"
@@ -8,6 +9,7 @@ enum AnalysisMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - Main View
 struct ContentView: View {
     @State private var selectedFolderURLs: [URL] = []
     @State private var similarityThreshold: Double = 0.2
@@ -16,10 +18,38 @@ struct ContentView: View {
     @State private var scanTopLevelOnly: Bool = false
     @State private var processingProgress: Double? = nil
     @State private var selectedAnalysisMode: AnalysisMode = .perceptualHash
+    @State private var selectedRowID: String? = nil
+    @State private var selectedRowIDs: Set<String> = []
+    @State private var toggleVersion = 0
+
+    struct TableRow: Identifiable, Hashable {
+        var id: String { reference + "::" + similar }
+        let reference: String
+        let similar: String
+        let percent: Double
+    }
+
+    private var flattenedResults: [TableRow] {
+        comparisonResults.flatMap { result in
+            result.similars.filter { $0.path != result.reference }.map { item in
+                TableRow(reference: result.reference, similar: item.path, percent: item.percent)
+            }
+        }
+    }
+
+    private var selectedRow: TableRow? {
+        flattenedResults.first(where: { $0.id == selectedRowID })
+    }
+    
+    private var selectedMatches: [String] {
+        flattenedResults
+            .filter { selectedRowIDs.contains($0.id) }
+            .map { $0.similar }
+    }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // Folder selection
             Button("Select Folders of Images") {
                 selectFolders()
             }
@@ -56,50 +86,112 @@ struct ContentView: View {
             }
             .disabled(selectedFolderURLs.isEmpty || isProcessing)
 
+            if !selectedMatches.isEmpty {
+                Button(role: .destructive) {
+                    deleteSelectedMatches()
+                } label: {
+                    Label("Delete Selected Matches (\(selectedMatches.count))", systemImage: "trash")
+                }
+            }
+
+            
             Divider()
 
             if comparisonResults.isEmpty {
                 Text("No results yet.")
                     .foregroundStyle(.secondary)
             } else {
-                List(comparisonResults) { result in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .center, spacing: 12) {
-                            Image(nsImage: ImageAnalyzer.loadThumbnail(for: result.reference, size: 48))
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 48, height: 48)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                            Text("📌 \(result.reference)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+                HSplitView {
+                    Table(flattenedResults, selection: $selectedRowID) {
+                        TableColumn("") { row in
+                            Toggle("", isOn: Binding(
+                                get: { selectedRowIDs.contains(row.id) },
+                                set: { isSelected in
+                                    if isSelected {
+                                        selectedRowIDs.insert(row.id)
+                                    } else {
+                                        selectedRowIDs.remove(row.id)
+                                    }
+                                    toggleVersion += 1
+                                }
+                            ))
+                            .toggleStyle(.checkbox)
+                            .labelsHidden()
                         }
+                        .width(30)
 
-                        ForEach(result.similars.filter { $0.path != result.reference }, id: \.path) { item in
-                            HStack(alignment: .center, spacing: 12) {
-                                Image(nsImage: ImageAnalyzer.loadThumbnail(for: item.path, size: 48))
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: 48, height: 48)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                if item.percent == 1.0 {
-                                    Text("🟩 \(item.path) (100%)")
-                                } else {
-                                    Text("🟨 \(item.path) (\(Int(item.percent * 100))%)")
+                        TableColumn("Reference") { row in Text(row.reference) }
+                        TableColumn("Similar") { row in Text(row.similar) }
+                        TableColumn("Percent") { row in Text("\(Int(row.percent * 100))%") }
+                    }
+                    .id(toggleVersion)
+                    .frame(minWidth: 400)
+
+                    VStack {
+                        if let row = selectedRow {
+                            HStack(alignment: .top, spacing: 20) {
+                                VStack {
+                                    Text("Reference")
+                                    loadPreview(for: row.reference)
+                                    Button("Delete Reference") {
+                                        deleteFile(at: row.reference)
+                                    }
+                                }
+
+                                VStack {
+                                    Text("Match")
+                                    loadPreview(for: row.similar)
+                                    Button("Delete Match") {
+                                        deleteFile(at: row.similar)
+                                    }
                                 }
                             }
+                        } else {
+                            Text("Select a row to preview")
                         }
+                        Spacer()
                     }
-                    .padding(.vertical, 4)
+                    .frame(minWidth: 300)
                 }
             }
 
             Spacer()
         }
         .padding()
-        .frame(minWidth: 600, minHeight: 500)
+        .frame(minWidth: 700, minHeight: 500)
+        .onAppear {
+            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                if event.keyCode == 49, // spacebar
+                   NSApp.keyWindow?.firstResponder is NSTableView {
+                    toggleSelectedRow()
+
+                    DispatchQueue.main.async {
+                        if let contentView = NSApp.keyWindow?.contentView,
+                           let tableView = findTableView(in: contentView) {
+                            NSApp.keyWindow?.makeFirstResponder(tableView)
+                        }
+                    }
+                    return nil
+                }
+                return event
+            }
+        }
     }
 
+    private func deleteSelectedMatches() {
+        for path in selectedMatches {
+            try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+        }
+
+        comparisonResults.removeAll { result in
+            result.similars.contains(where: { selectedMatches.contains($0.path) })
+        }
+
+        selectedRowIDs.removeAll()
+        toggleVersion += 1
+    }
+
+    
     private func selectFolders() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -109,6 +201,7 @@ struct ContentView: View {
         if panel.runModal() == .OK {
             selectedFolderURLs = panel.urls
             comparisonResults = []
+            selectedRowIDs = []
         }
     }
 
@@ -117,6 +210,7 @@ struct ContentView: View {
         isProcessing = true
         processingProgress = 0
         comparisonResults = []
+        selectedRowIDs = []
 
         let folders = findLeafFolders(from: selectedFolderURLs)
 
@@ -177,5 +271,56 @@ struct ContentView: View {
 
         return leafFolders
     }
+
+    private func toggleSelectedRow() {
+        guard NSApp.keyWindow?.firstResponder is NSTableView else { return }
+        guard let id = selectedRowID else { return }
+        if selectedRowIDs.contains(id) {
+            selectedRowIDs.remove(id)
+        } else {
+            selectedRowIDs.insert(id)
+        }
+        toggleVersion += 1
+    }
+
+    private func loadPreview(for path: String) -> some View {
+        if let image = NSImage(contentsOfFile: path) {
+            return AnyView(
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 300, maxHeight: 300)
+                    .border(Color.gray)
+            )
+        } else {
+            return AnyView(
+                Image(systemName: "questionmark.square")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 100, height: 100)
+                    .foregroundColor(.secondary)
+            )
+        }
+    }
+
+
+    private func deleteFile(at path: String) {
+        try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+        comparisonResults.removeAll { $0.reference == path || $0.similars.contains(where: { $0.path == path }) }
+        selectedRowIDs.remove(path)
+        toggleVersion += 1
+    }
+}
+
+// MARK: - AppKit Helper
+func findTableView(in view: NSView?) -> NSTableView? {
+    guard let view else { return nil }
+    if let table = view as? NSTableView { return table }
+    for sub in view.subviews {
+        if let found = findTableView(in: sub) {
+            return found
+        }
+    }
+    return nil
 }
 
