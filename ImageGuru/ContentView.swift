@@ -57,6 +57,18 @@ struct ContentView: View {
 
             Toggle("Limit scan to selected folders only", isOn: $scanTopLevelOnly)
 
+            if selectedFolderURLs.isEmpty {
+                Text("No folders selected.")
+                    .foregroundStyle(.secondary)
+            } else {
+                // Always display only leaf folders (lowest-level folders without subfolders)
+                let foldersToDisplay: [URL] = findLeafFolders(from: selectedFolderURLs)
+                Text("Folders to Scan: " + foldersToDisplay.map { $0.lastPathComponent }.joined(separator: ", "))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            
             Picker("Analysis Mode", selection: $selectedAnalysisMode) {
                 ForEach(AnalysisMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)
@@ -120,8 +132,15 @@ struct ContentView: View {
                         }
                         .width(30)
 
-                        TableColumn("Reference") { row in Text(row.reference) }
-                        TableColumn("Similar") { row in Text(row.similar) }
+                        TableColumn("Reference") { row in
+                            Text(row.reference)
+                                .foregroundStyle(isCrossFolder(row) ? .red : .primary)
+                        }
+                        TableColumn("Similar") { row in
+                            Text(row.similar)
+                                .foregroundStyle(isCrossFolder(row) ? .red : .primary)
+                        }
+
                         TableColumn("Percent") { row in Text("\(Int(row.percent * 100))%") }
                     }
                     .id(toggleVersion)
@@ -178,6 +197,13 @@ struct ContentView: View {
         }
     }
 
+    private func isCrossFolder(_ row: TableRow) -> Bool {
+        let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent()
+        let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent()
+        return refFolder != matchFolder
+    }
+
+    
     private func deleteSelectedMatches() {
         for path in selectedMatches {
             try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
