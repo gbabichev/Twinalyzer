@@ -237,30 +237,30 @@ struct ContentView: View {
                 return images[imageIndex]
             }()
 
-            VStack(spacing: 24) {
-                if let images = dedupedImages {
-                    // Always show reference image at top
-                    VStack {
-                        LargeImagePreview(path: images[0])
-                        Text("Reference")
-                            .font(.callout)
-                            .foregroundColor(.secondary)
-                    }
-
-                    if let selectedPath = selectedImagePath {
-                        VStack {
-                            LargeImagePreview(path: selectedPath)
-                            Text("Selected")
-                                .font(.callout)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                } else {
-                    Spacer()
-                }
-            }
-            .frame(minWidth: 360, maxWidth: 360, maxHeight: .infinity)
-            .padding(.top, 32)
+//            VStack(spacing: 24) {
+//                if let images = dedupedImages {
+//                    // Always show reference image at top
+//                    VStack {
+//                        LargeImagePreview(path: images[0])
+//                        Text("Reference")
+//                            .font(.callout)
+//                            .foregroundColor(.secondary)
+//                    }
+//
+//                    if let selectedPath = selectedImagePath {
+//                        VStack {
+//                            LargeImagePreview(path: selectedPath)
+//                            Text("Selected")
+//                                .font(.callout)
+//                                .foregroundColor(.secondary)
+//                        }
+//                    }
+//                } else {
+//                    Spacer()
+//                }
+//            }
+//            .frame(minWidth: 360, maxWidth: 360, maxHeight: .infinity)
+//            .padding(.top, 32)
         }
     }
 
