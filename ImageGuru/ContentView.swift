@@ -15,10 +15,11 @@ struct ContentView: View {
     @State private var isProcessing: Bool = false
     @State private var scanTopLevelOnly: Bool = false
     @State private var processingProgress: Double? = nil
-    @State private var selectedAnalysisMode: AnalysisMode = .perceptualHash
+    @State private var selectedAnalysisMode: AnalysisMode = .deepFeature
     @State private var selectedRowID: String? = nil
     @State private var selectedRowIDs: Set<String> = []
     @State private var toggleVersion = 0
+    @State private var sortByPercentDescending: Bool = true
 
     struct TableRow: Identifiable, Hashable {
         var id: String { reference + "::" + similar }
@@ -28,11 +29,12 @@ struct ContentView: View {
     }
 
     private var flattenedResults: [TableRow] {
-        comparisonResults.flatMap { result in
+        let rows = comparisonResults.flatMap { result in
             result.similars.filter { $0.path != result.reference }.map { item in
                 TableRow(reference: result.reference, similar: item.path, percent: item.percent)
             }
         }
+        return rows.sorted { sortByPercentDescending ? $0.percent > $1.percent : $0.percent < $1.percent }
     }
 
     private var selectedRow: TableRow? {
@@ -109,7 +111,30 @@ struct ContentView: View {
             if comparisonResults.isEmpty {
                 Text("No results yet.")
                     .foregroundStyle(.secondary)
-            } else {
+            }
+
+            if !comparisonResults.isEmpty {
+                Text("Number of matches found: \(flattenedResults.count)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !comparisonResults.isEmpty {
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button(action: { sortByPercentDescending.toggle() }) {
+                        HStack(spacing: 2) {
+                            Text("Sort by Percent")
+                            Image(systemName: sortByPercentDescending ? "arrow.down" : "arrow.up")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote)
+                }
+            }
+
+            if !comparisonResults.isEmpty {
                 HSplitView {
                     Table(flattenedResults, selection: $selectedRowID) {
                         TableColumn("") { row in
@@ -138,10 +163,12 @@ struct ContentView: View {
                                 .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                         }
 
-                        TableColumn("Percent") { row in Text("\(Int(row.percent * 100))%") }
+                        TableColumn("Percent") { row in
+                            Text("\(Int(row.percent * 100))%")
+                        }
+                        .width(70)
                     }
-                    .id(toggleVersion)
-                    .frame(minWidth: 400)
+                    .frame(minWidth: 50)
 
                     VStack {
                         if let row = selectedRow {
@@ -167,7 +194,6 @@ struct ContentView: View {
                         }
                         Spacer()
                     }
-                    .frame(minWidth: 300)
                 }
             }
 
@@ -264,35 +290,6 @@ struct ContentView: View {
         }
     }
 
-    private func findLeafFolders(from urls: [URL]) -> [URL] {
-        let fileManager = FileManager.default
-        var leafFolders = [URL]()
-        var seen = Set<URL>()
-
-        func recurse(_ url: URL) {
-            if let contents = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey]) {
-                let subfolders = contents.filter {
-                    (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                }
-                if subfolders.isEmpty {
-                    if seen.insert(url).inserted {
-                        leafFolders.append(url)
-                    }
-                } else {
-                    for subfolder in subfolders {
-                        recurse(subfolder)
-                    }
-                }
-            }
-        }
-
-        for url in urls {
-            recurse(url)
-        }
-
-        return leafFolders
-    }
-
     private func toggleSelectedRow() {
         guard NSApp.keyWindow?.firstResponder is NSTableView else { return }
         guard let id = selectedRowID else { return }
@@ -310,7 +307,7 @@ struct ContentView: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 300, maxHeight: 300)
+                    .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
                     .border(Color.gray)
             )
         } else {
@@ -339,16 +336,5 @@ struct ContentView: View {
         default: return "Exact"
         }
     }
-}
-
-func findTableView(in view: NSView?) -> NSTableView? {
-    guard let view else { return nil }
-    if let table = view as? NSTableView { return table }
-    for sub in view.subviews {
-        if let found = findTableView(in: sub) {
-            return found
-        }
-    }
-    return nil
 }
 
