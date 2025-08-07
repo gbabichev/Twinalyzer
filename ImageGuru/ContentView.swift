@@ -229,13 +229,22 @@ struct ContentView: View {
         for path in selectedMatches {
             try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
         }
-
-        comparisonResults.removeAll { result in
-            result.similars.contains(where: { selectedMatches.contains($0.path) })
+        for (index, var result) in comparisonResults.enumerated().reversed() {
+            let filteredSimilars = result.similars.filter { !selectedMatches.contains($0.path) }
+            let nonReferenceSimilars = filteredSimilars.filter { $0.path != result.reference }
+            if selectedMatches.contains(result.reference) || nonReferenceSimilars.isEmpty {
+                comparisonResults.remove(at: index)
+            } else if filteredSimilars.count != result.similars.count {
+                comparisonResults[index] = ImageComparisonResult(reference: result.reference, similars: filteredSimilars)
+            }
         }
-
         selectedRowIDs.removeAll()
         toggleVersion += 1
+        print("After multi-delete, comparisonResults count: \(comparisonResults.count)")
+        for result in comparisonResults {
+            print("Reference: \(result.reference), Similars: \(result.similars.map { $0.path })")
+        }
+        //print("flattenedResults after multi-delete: \(flattenedResults.map { $0.reference + " => " + $0.similar })")
     }
 
     private func selectFolders() {
@@ -323,9 +332,23 @@ struct ContentView: View {
 
     private func deleteFile(at path: String) {
         try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
-        comparisonResults.removeAll { $0.reference == path || $0.similars.contains(where: { $0.path == path }) }
+        for (index, var result) in comparisonResults.enumerated().reversed() {
+            let filteredSimilars = result.similars.filter { $0.path != path }
+            // Only remove the group if NO similars remain except possibly the reference
+            let nonReferenceSimilars = filteredSimilars.filter { $0.path != result.reference }
+            if result.reference == path || nonReferenceSimilars.isEmpty {
+                comparisonResults.remove(at: index)
+            } else if filteredSimilars.count != result.similars.count {
+                comparisonResults[index] = ImageComparisonResult(reference: result.reference, similars: filteredSimilars)
+            }
+        }
         selectedRowIDs.remove(path)
         toggleVersion += 1
+        //print("After deletion, comparisonResults count: \(comparisonResults.count)")
+        for result in comparisonResults {
+            print("Reference: \(result.reference), Similars: \(result.similars.map { $0.path })")
+        }
+        //print("flattenedResults after delete: \(flattenedResults.map { $0.reference + " => " + $0.similar })")
     }
 
     private func sliderLabel(for value: Double) -> String {
