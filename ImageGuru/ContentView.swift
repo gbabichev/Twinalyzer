@@ -20,8 +20,17 @@ struct ContentView: View {
     @State private var selectedRowID: String? = nil
     @State private var selectedRowIDs: Set<String> = []
     @State private var toggleVersion = 0
-    @State private var sortByPercentDescending: Bool = true
     @State private var selectedTab: Int = 0
+    private var sortedRows: [TableRow] {
+        var rows = flattenedResults
+        rows.sort(using: sortOrder)   // ← apply the Table's sort order
+        return rows
+    }
+
+    // NEW: Table sort order (default: Percent descending)
+    @State private var sortOrder: [KeyPathComparator<TableRow>] = [
+        .init(\.percent, order: .reverse)
+    ]
 
     // Thumbnail cache for Duplicate Folders list
     @State private var folderThumbs: [String: NSImage] = [:]
@@ -36,18 +45,18 @@ struct ContentView: View {
     // === Derived data ONLY used when isProcessing == false ===
 
     private var flattenedResults: [TableRow] {
-        let rows = comparisonResults.flatMap { result in
+        comparisonResults.flatMap { result in
             result.similars
                 .filter { $0.path != result.reference }
                 .map { item in
                     TableRow(reference: result.reference, similar: item.path, percent: item.percent)
                 }
         }
-        return rows.sorted { sortByPercentDescending ? $0.percent > $1.percent : $0.percent < $1.percent }
+        // Note: do NOT sort here; Table handles sorting via sortOrder
     }
 
     private var selectedRow: TableRow? {
-        flattenedResults.first(where: { $0.id == selectedRowID })
+        sortedRows.first(where: { $0.id == selectedRowID })
     }
 
     private var selectedMatches: [String] {
@@ -199,19 +208,7 @@ struct ContentView: View {
                                     Text("Number of matches found: \(flattenedResults.count)")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
-
-                                    HStack(spacing: 8) {
-                                        Spacer()
-                                        Button(action: { sortByPercentDescending.toggle() }) {
-                                            HStack(spacing: 2) {
-                                                Text("Sort by Percent")
-                                                Image(systemName: sortByPercentDescending ? "arrow.down" : "arrow.up")
-                                                    .font(.system(size: 10, weight: .bold))
-                                            }
-                                        }
-                                        .buttonStyle(.plain)
-                                        .font(.footnote)
-                                    }
+                                    // Removed manual "Sort by Percent" button; use sortable headers instead
                                 }
                             }
                             .padding()
@@ -222,7 +219,7 @@ struct ContentView: View {
                         // Results
                         Group {
                             HSplitView {
-                                Table(flattenedResults, selection: $selectedRowID) {
+                                Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
                                     TableColumn("") { row in
                                         Toggle("", isOn: Binding(
                                             get: { selectedRowIDs.contains(row.id) },
@@ -240,16 +237,20 @@ struct ContentView: View {
                                     }
                                     .width(30)
 
-                                    TableColumn("Reference") { row in
+                                    // Sortable by "Reference"
+                                    TableColumn("Reference", value: \.reference) { row in
                                         Text(row.reference)
                                             .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                                     }
-                                    TableColumn("Similar") { row in
+
+                                    // Sortable by "Match" (previously "Similar")
+                                    TableColumn("Match", value: \.similar) { row in
                                         Text(row.similar)
                                             .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                                     }
 
-                                    TableColumn("Percent") { row in
+                                    // Sortable numeric "Percent"
+                                    TableColumn("Percent", value: \.percent) { row in
                                         Text("\(Int(row.percent * 100))%")
                                     }
                                     .width(70)
@@ -382,7 +383,6 @@ struct ContentView: View {
             let leafs = findLeafFolders(from: urls)
             foldersToScanLabel = leafs.map { $0.lastPathComponent }.joined(separator: ", ")
         }
-
     }
 
     // MARK: - Actions
@@ -430,7 +430,6 @@ struct ContentView: View {
             folderThumbs.removeAll()
         }
     }
-
 
     private func processImages() {
         guard !selectedFolderURLs.isEmpty else { return }
