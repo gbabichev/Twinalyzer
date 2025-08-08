@@ -11,6 +11,7 @@ final class AppViewModel: ObservableObject {
     @Published var scanTopLevelOnly: Bool = false
     @Published var isProcessing: Bool = false
     @Published var processingProgress: Double? = nil
+    @Published var analysisCancelled: Bool = false
 
     // Results + caches
     @Published var comparisonResults: [ImageComparisonResult] = []
@@ -112,6 +113,7 @@ final class AppViewModel: ObservableObject {
     // MARK: - Analysis entrypoint
     func processImages(progress: @escaping (Double) -> Void) {
         guard !isProcessing else { return }
+        analysisCancelled = false
         isProcessing = true
         processingProgress = nil
 
@@ -128,6 +130,11 @@ final class AppViewModel: ObservableObject {
 
         let finish: ([ImageComparisonResult]) -> Void = { results in
             DispatchQueue.main.async {
+                if self.analysisCancelled {
+                    self.processingProgress = nil
+                    self.isProcessing = false
+                    return
+                }
                 self.comparisonResults = results
                 self.processingProgress = nil
                 self.isProcessing = false
@@ -136,6 +143,8 @@ final class AppViewModel: ObservableObject {
             }
         }
 
+        let shouldCancel = { [weak self] in self?.analysisCancelled ?? false }
+
         switch selectedAnalysisMode {
         case .deepFeature:
             ImageAnalyzer.analyzeWithDeepFeatures(
@@ -143,6 +152,7 @@ final class AppViewModel: ObservableObject {
                 similarityThreshold: threshold,
                 topLevelOnly: topOnly,
                 progress: progressSink,
+                shouldCancel: shouldCancel,
                 completion: finish
             )
         case .perceptualHash:
@@ -151,9 +161,17 @@ final class AppViewModel: ObservableObject {
                 similarityThreshold: threshold,
                 topLevelOnly: topOnly,
                 progress: progressSink,
+                shouldCancel: shouldCancel,
                 completion: finish
             )
         }
+    }
+
+    // MARK: - Cancel analysis
+    func cancelAnalysis() {
+        analysisCancelled = true
+        isProcessing = false
+        processingProgress = nil
     }
 
     // MARK: - Delete helpers

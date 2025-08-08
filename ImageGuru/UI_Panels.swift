@@ -35,6 +35,15 @@ extension ContentView {
                     .frame(maxHeight: 200)
                 }
             }
+            
+            //Spacer(minLength: 12)
+            Button("Cancel") {
+                vm.cancelAnalysis()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!vm.isProcessing)
+            
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -56,10 +65,17 @@ extension ContentView {
     var controlsPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack {
+                HStack(spacing: 12) {
                     Button("Select Folders") { selectFolders() }
-                    Button("Analyze") { vm.processImages(progress: { p in vm.processingProgress = p }) }
-                        .disabled(vm.selectedFolderURLs.isEmpty)
+                        .frame(maxWidth: .infinity, minHeight: 44) // full width share + taller
+                        //.buttonStyle(.borderedProminent)
+
+                    Button("Analyze") {
+                        vm.processImages(progress: { p in vm.processingProgress = p })
+                    }
+                    .disabled(vm.selectedFolderURLs.isEmpty)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .buttonStyle(.borderedProminent)
                 }
 
                 Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
@@ -97,6 +113,7 @@ extension ContentView {
                     } label: {
                         Label("Delete Selected Matches (\(selectedMatches.count))", systemImage: "trash")
                     }
+                    .tint(.red)
                 }
 
                 Divider()

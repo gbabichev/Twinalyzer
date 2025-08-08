@@ -209,6 +209,7 @@ struct ImageAnalyzer {
         similarityThreshold: Double,
         topLevelOnly: Bool,
         progress: ((Double) -> Void)? = nil,
+        shouldCancel: (() -> Bool)? = nil,
         completion: @escaping ([ImageComparisonResult]) -> Void
     ) {
         let progressSink = progress.map { ProgressThrottler(sink: $0) }
@@ -275,6 +276,13 @@ struct ImageAnalyzer {
                 var processed = 0
 
                 for dir in subdirs {
+                    if shouldCancel?() == true {
+                        DispatchQueue.main.async {
+                            completion([])
+                        }
+                        return
+                    }
+
                     let files = topLevelImageFiles(in: dir)
                     guard !files.isEmpty else { continue }
 
@@ -282,6 +290,12 @@ struct ImageAnalyzer {
                     hashes.reserveCapacity(files.count)
 
                     for url in files {
+                        if shouldCancel?() == true {
+                            DispatchQueue.main.async {
+                                completion([])
+                            }
+                            return
+                        }
                         autoreleasepool {
                             if let hash = subjectBlockHash(for: url) ?? blockHash(for: url) {
                                 hashes.append((url, hash))
@@ -297,7 +311,15 @@ struct ImageAnalyzer {
             } else {
                 // B) Compare across ALL images from ALL subfolders combined (recursive)
                 var imageFiles: [URL] = []
-                for d in subdirs { imageFiles.append(contentsOf: allImageFiles(in: d)) }
+                for d in subdirs {
+                    if shouldCancel?() == true {
+                        DispatchQueue.main.async {
+                            completion([])
+                        }
+                        return
+                    }
+                    imageFiles.append(contentsOf: allImageFiles(in: d))
+                }
 
                 let total = imageFiles.count
                 if total == 0 {
@@ -313,6 +335,12 @@ struct ImageAnalyzer {
                 var processed = 0
 
                 for url in imageFiles {
+                    if shouldCancel?() == true {
+                        DispatchQueue.main.async {
+                            completion([])
+                        }
+                        return
+                    }
                     autoreleasepool {
                         if let hash = subjectBlockHash(for: url) ?? blockHash(for: url) {
                             hashes.append((url, hash))
@@ -331,4 +359,3 @@ struct ImageAnalyzer {
         }
     }
 }
-

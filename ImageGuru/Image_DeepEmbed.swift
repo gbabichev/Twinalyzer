@@ -100,6 +100,7 @@ extension ImageAnalyzer {
         similarityThreshold: Double, // 0...1
         topLevelOnly: Bool,
         progress: ((Double) -> Void)? = nil,
+        shouldCancel: (() -> Bool)? = nil,
         completion: @escaping ([ImageComparisonResult]) -> Void
     ) {
         let progressSink = progress.map { ProgressThrottler(sink: $0) }
@@ -124,6 +125,13 @@ extension ImageAnalyzer {
                 var processed = 0
 
                 for dir in subdirs {
+                    if shouldCancel?() == true {
+                        DispatchQueue.main.async {
+                            completion([])
+                        }
+                        return
+                    }
+
                     let files = topLevelImageFiles(in: dir)
                     guard !files.isEmpty else { continue }
 
@@ -131,6 +139,12 @@ extension ImageAnalyzer {
                     embeddings.reserveCapacity(files.count)
 
                     for url in files {
+                        if shouldCancel?() == true {
+                            DispatchQueue.main.async {
+                                completion([])
+                            }
+                            return
+                        }
                         autoreleasepool {
                             if let obs = featurePrintObservation(for: url) {
                                 embeddings.append(ImageEmbedding(url: url, observation: obs))
@@ -146,7 +160,15 @@ extension ImageAnalyzer {
             } else {
                 // B) Compare across ALL subfolders combined (recursive)
                 var imageFiles: [URL] = []
-                for d in subdirs { imageFiles.append(contentsOf: allImageFiles(in: d)) }
+                for d in subdirs {
+                    if shouldCancel?() == true {
+                        DispatchQueue.main.async {
+                            completion([])
+                        }
+                        return
+                    }
+                    imageFiles.append(contentsOf: allImageFiles(in: d))
+                }
 
                 let total = imageFiles.count
                 if total == 0 {
@@ -162,6 +184,12 @@ extension ImageAnalyzer {
                 var processed = 0
 
                 for url in imageFiles {
+                    if shouldCancel?() == true {
+                        DispatchQueue.main.async {
+                            completion([])
+                        }
+                        return
+                    }
                     autoreleasepool {
                         if let obs = featurePrintObservation(for: url) {
                             embeddings.append(ImageEmbedding(url: url, observation: obs))
@@ -172,6 +200,13 @@ extension ImageAnalyzer {
                 }
 
                 results = clusterFeatureObservations(embeddings, threshold: similarityThreshold)
+            }
+
+            if shouldCancel?() == true {
+                DispatchQueue.main.async {
+                    completion([])
+                }
+                return
             }
 
             DispatchQueue.main.async {
