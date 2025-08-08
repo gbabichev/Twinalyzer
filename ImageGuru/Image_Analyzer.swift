@@ -264,9 +264,11 @@ struct ImageAnalyzer {
 
             var results: [ImageComparisonResult] = []
 
-            // === IMPORTANT: Always discard roots; only process subfolders ===
-            let subdirs = recursiveSubdirectoriesExcludingRoots(under: roots)
-
+            // Process all subfolders AND root folders (if selected).
+            let subdirs = Array(
+                Set(roots.map(\.standardizedFileURL) + recursiveSubdirectoriesExcludingRoots(under: roots))
+            ).sorted { $0.path < $1.path }
+            
             if topLevelOnly {
                 // A) Compare within each subfolder independently (no cross-folder matches)
                 let totalImages = subdirs.reduce(0) { $0 + topLevelImageFiles(in: $1).count }
