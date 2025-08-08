@@ -384,20 +384,19 @@ struct ContentView: View {
 
     private func installSpacebarToggle() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 49,
-               NSApp.keyWindow?.firstResponder is NSTableView {
+            if event.keyCode == 49, // space
+               let tableView = NSApp.keyWindow?.firstResponder as? NSTableView {
+                // Remember the exact table that had focus
                 toggleSelectedRow()
                 DispatchQueue.main.async {
-                    if let contentView = NSApp.keyWindow?.contentView,
-                       let tableView = findTableView(in: contentView) {
-                        NSApp.keyWindow?.makeFirstResponder(tableView)
-                    }
+                    NSApp.keyWindow?.makeFirstResponder(tableView)
                 }
-                return nil
+                return nil // consume
             }
             return event
         }
     }
+
 
     private func openFolderInFinder(_ path: String) {
         let url = URL(fileURLWithPath: path, isDirectory: true)
