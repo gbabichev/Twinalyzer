@@ -47,7 +47,7 @@ struct PreviewImage: View {
     private func load() async {
         let key = cacheKey as NSString
         if let cached = ImageCache.shared.object(forKey: key) {
-            await setImage(cached)
+            setImage(cached)
             return
         }
         let bucket = Self.bucket(for: maxDimension)
@@ -61,6 +61,7 @@ struct PreviewImage: View {
         }
 
         if let ns { ImageCache.shared.setObject(ns, forKey: key) }
-        await setImage(ns)
+        setImage(ns)
     }
 }
+

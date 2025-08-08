@@ -41,11 +41,11 @@ struct ContentView: View {
         }
         .frame(minWidth: 700, minHeight: 500)
         .onAppear { installSpacebarToggle() }
-        .onChange(of: vm.selectedFolderURLs) { urls in
+        .onChange(of: vm.selectedFolderURLs) { _, urls in
             let leafs = findLeafFolders(from: urls)
             vm.foldersToScanLabel = leafs.map { $0.lastPathComponent }.joined(separator: "\n")
         }
-        .onChange(of: vm.comparisonResults.count) { _ in vm.recomputeDerived() }
+        .onChange(of: vm.comparisonResults.count) { _, _ in vm.recomputeDerived() }
     }
 
     var mainSplitView: some View {
@@ -55,3 +55,4 @@ struct ContentView: View {
         }
     }
 }
+

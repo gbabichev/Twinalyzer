@@ -108,29 +108,48 @@ final class AppViewModel: ObservableObject {
         guard !isProcessing else { return }
         isProcessing = true
         processingProgress = nil
+
         let roots = selectedFolderURLs
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
 
-        ImageAnalyzer.analyzeImages(
-            inFolders: roots,
-            similarityThreshold: threshold,
-            topLevelOnly: topOnly,
-            progress: { p in
-                DispatchQueue.main.async {
-                    self.processingProgress = p
-                    progress(p)
-                }
-            },
-            completion: { results in
+        let progressSink: (Double) -> Void = { p in
+            DispatchQueue.main.async {
+                self.processingProgress = p
+                progress(p)
+            }
+        }
+
+        let finish: ([ImageComparisonResult]) -> Void = { results in
+            DispatchQueue.main.async {
                 self.comparisonResults = results
                 self.processingProgress = nil
                 self.isProcessing = false
                 self.recomputeDerived()
                 self.preloadAllFolderThumbnails()
             }
-        )
+        }
+
+        switch selectedAnalysisMode {
+        case .deepFeature:
+            ImageAnalyzer.analyzeWithDeepFeatures(
+                inFolders: roots,
+                similarityThreshold: threshold,
+                topLevelOnly: topOnly,
+                progress: progressSink,
+                completion: finish
+            )
+        case .perceptualHash:
+            ImageAnalyzer.analyzeImages(
+                inFolders: roots,
+                similarityThreshold: threshold,
+                topLevelOnly: topOnly,
+                progress: progressSink,
+                completion: finish
+            )
+        }
     }
+
 
     // MARK: - Delete helpers
     func deleteSelectedMatches(selectedMatches: [String]) {
