@@ -220,59 +220,5 @@ extension ContentView {
         }
     }
 
-    // moved to AppViewModel
 
-
-    // moved to AppViewModel
-
-
-    func toggleSelectedRow() {
-        guard let id = selectedRowID else { return }
-        if selectedRowIDs.contains(id) {
-            selectedRowIDs.remove(id)
-        } else {
-            selectedRowIDs.insert(id)
-        }
-    }
-
-    // MARK: - UI helpers still owned by the view
-
-    func selectFolders() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true
-        panel.title = "Select Folders of Images"
-
-        if panel.runModal() == .OK {
-            vm.selectedFolderURLs = panel.urls
-            let leafs = findLeafFolders(from: panel.urls)
-            vm.foldersToScanLabel = leafs.map { $0.lastPathComponent }.joined(separator: "\n")
-            vm.recomputeDerived()
-            vm.preloadAllFolderThumbnails()
-        }
-    }
-
-    /// Formats the similarity slider’s value as a percent label.
-    func sliderLabel(_ value: Double) -> String {
-        "\(Int(round(value * 100)))%"
-    }
-
-    /// Returns true if the match is across different folders (used to tint cross‑folder rows).
-    func isCrossFolder(_ row: TableRow) -> Bool {
-        let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-        let simFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-        return refFolder != simFolder
-    }
-
-    func installSpacebarToggle() {
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // 49 = spacebar
-            if event.keyCode == 49 {
-                toggleSelectedRow()
-                return nil // swallow the event so it doesn't scroll the view
-            }
-            return event
-        }
-    }
 }

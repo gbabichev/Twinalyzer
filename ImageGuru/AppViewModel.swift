@@ -79,7 +79,6 @@ final class AppViewModel: ObservableObject {
         cachedClusters = clusters
     }
 
-
     // MARK: - Thumbnails preload
     func preloadAllFolderThumbnails() {
         folderThumbs.removeAll()
@@ -149,7 +148,6 @@ final class AppViewModel: ObservableObject {
             )
         }
     }
-
 
     // MARK: - Delete helpers
     func deleteSelectedMatches(selectedMatches: [String]) {

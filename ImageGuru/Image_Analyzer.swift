@@ -12,6 +12,13 @@ struct ImageComparisonResult: Identifiable {
     let similars: [(path: String, percent: Double)]
 }
 
+struct TableRow: Identifiable, Hashable {
+    var id: String { reference + "::" + similar }
+    let reference: String
+    let similar: String
+    let percent: Double
+}
+
 struct ImageAnalyzer {
     static let supportedExtensions: Set<String> = ["jpg", "jpeg", "png", "bmp", "tiff", "gif", "heic", "heif", "webp"]
 
