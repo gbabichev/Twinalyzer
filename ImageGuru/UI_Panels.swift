@@ -20,11 +20,10 @@ extension ContentView {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 controlsPanel
-                    .frame(width: max(geometry.size.width * 0.3, 320))
+                    .frame(width: 520)
                 Divider()
                 duplicateFoldersPanel
                     .frame(minWidth: 220)
-                    .frame(width: geometry.size.width * 0.7)
                     .padding()
             }
         }
@@ -112,17 +111,21 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             } else {
                 List {
-                    ForEach(Array(vm.cachedClusters.enumerated()), id: \.offset) { index, cluster in
+                    ForEach(vm.cachedClusters.indices, id: \.self) { i in
                         Section {
-                            ForEach(cluster, id: \.self) { folder in
+                            ForEach(vm.cachedClusters[i], id: \.self) { folder in
                                 Button(action: { vm.openFolderInFinder(folder) }) {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(folder)
-                                                .lineLimit(1)
-                                                .truncationMode(.middle)
-                                        }
-                                        Spacer()
+                                    HStack(alignment: .center, spacing: 12) {
+                                        // inline short name: "parent/filename"
+                                        let url = URL(fileURLWithPath: folder)
+                                        let name = url.lastPathComponent
+                                        let parent = url.deletingLastPathComponent().lastPathComponent
+                                        Text(parent.isEmpty ? name : "\(parent)/\(name)")
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+
+                                        Spacer(minLength: 12)
+
                                         HStack(spacing: 8) {
                                             if let img = vm.folderThumbs[folder] {
                                                 Image(nsImage: img)
@@ -137,7 +140,7 @@ extension ContentView {
                                                     )
                                             }
                                             Text("\(vm.cachedFolderDuplicateCount[folder, default: 0]) duplicates")
-                                                .foregroundColor(.secondary)
+                                                .foregroundStyle(.secondary)
                                                 .font(.footnote)
                                         }
                                     }
@@ -147,15 +150,16 @@ extension ContentView {
                             }
                         } header: {
                             HStack {
-                                Text("Group \(index + 1)")
+                                Text("Group \(i + 1)")
                                 Spacer()
-                                Text("\(cluster.count) folder\(cluster.count == 1 ? "" : "s")")
+                                Text("\(vm.cachedClusters[i].count) folder\(vm.cachedClusters[i].count == 1 ? "" : "s")")
                                     .foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
                 .frame(minHeight: 240)
+
             }
             Spacer()
         }
@@ -180,12 +184,12 @@ extension ContentView {
                 .width(30)
 
                 TableColumn("Reference", value: \.reference) { row in
-                    Text(row.reference)
+                    Text(shortDisplayPath(for: row.reference))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
 
                 TableColumn("Match", value: \.similar) { row in
-                    Text(row.similar)
+                    Text(shortDisplayPath(for: row.similar))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
 
@@ -194,14 +198,14 @@ extension ContentView {
                 }
                 .width(70)
             }
-            .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
 
             // RIGHT: preview — also flexible
             previewPanel
                 .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1) // bias growth toward the preview when space increases
         }
-        .frame(minHeight: 320)
+        //.frame(minHeight: 320)
     }
 
     var previewPanel: some View {
@@ -215,11 +219,14 @@ extension ContentView {
                     let singleColumn = twoColumnWidth / 2
 
                     // Use the smaller of width/height so images fit in both axes
-                    let maxDim = max(200, min(singleColumn, geo.size.height - 80)) // the -80 gives room for labels/buttons
+                    let maxDim = min(singleColumn, geo.size.height - 120) // bumped padding to give more room
+
 
                     HStack(alignment: .top, spacing: spacing) {
                         VStack(spacing: 8) {
                             Text("Reference")
+                            Text(shortDisplayPath(for: row.reference))
+                                //.foregroundStyle(isCrossFolder(row) ? .red : .primary)
                             PreviewImage(path: row.reference, maxDimension: maxDim)
                                 .frame(width: maxDim, height: maxDim)
                                 .clipped()
@@ -227,6 +234,8 @@ extension ContentView {
                         }
                         VStack(spacing: 8) {
                             Text("Match")
+                            Text(shortDisplayPath(for: row.similar))
+                                .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                             PreviewImage(path: row.similar, maxDimension: maxDim)
                                 .frame(width: maxDim, height: maxDim)
                                 .clipped()

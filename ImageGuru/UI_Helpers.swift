@@ -89,5 +89,19 @@ extension ContentView {
         }
     }
     
+    func shortDisplayPath(for fullPath: String) -> String {
+        let url = URL(fileURLWithPath: fullPath)
+        let comps = url.pathComponents
+        if comps.count >= 2 {
+            return comps.suffix(2).joined(separator: "/")
+        } else {
+            return url.lastPathComponent
+        }
+    }
+
+    
+    
+    
+    
 }
 
