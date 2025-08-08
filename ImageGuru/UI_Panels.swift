@@ -194,7 +194,7 @@ extension ContentView {
                 }
                 .width(70)
             }
-            .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
 
             // RIGHT: preview — also flexible
             previewPanel

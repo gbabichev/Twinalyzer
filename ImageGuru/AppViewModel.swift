@@ -151,21 +151,13 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Delete helpers
     func deleteSelectedMatches(selectedMatches: [String]) {
-        // Remove selected similar paths from results; drop result if empty or if reference removed
-        for (index, result) in comparisonResults.enumerated().reversed() {
-            let filteredSimilars = result.similars.filter { !selectedMatches.contains($0.path) }
-            let nonReferenceSimilars = filteredSimilars.filter { $0.path != result.reference }
-            if selectedMatches.contains(result.reference) || nonReferenceSimilars.isEmpty {
-                comparisonResults.remove(at: index)
-            } else if filteredSimilars.count != result.similars.count {
-                comparisonResults[index] = ImageComparisonResult(reference: result.reference, similars: filteredSimilars)
-            }
+        guard !selectedMatches.isEmpty else { return }
+        for path in selectedMatches {
+            deleteFile(path)
         }
-        // Recompute caches after modification
-        recomputeDerived()
-        preloadAllFolderThumbnails()
     }
-
+    
+    // MARK: - Moves files to trash
     func deleteFile(_ path: String) {
         try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
         for (index, result) in comparisonResults.enumerated().reversed() {
