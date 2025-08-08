@@ -3,7 +3,7 @@ import AppKit
 
 extension ContentView {
 
-var processingView: some View {
+    var processingView: some View {
         VStack(spacing: 16) {
             if let p = vm.processingProgress {
                 ProgressView(value: p).frame(width: 320)
@@ -16,7 +16,7 @@ var processingView: some View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-var topSplitView: some View {
+    var topSplitView: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 controlsPanel
@@ -31,7 +31,7 @@ var topSplitView: some View {
         .frame(minHeight: 320)
     }
 
-var controlsPanel: some View {
+    var controlsPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack {
@@ -91,7 +91,7 @@ var controlsPanel: some View {
         }
     }
 
-var duplicateFoldersPanel: some View {
+    var duplicateFoldersPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Duplicate Folder Groups").font(.headline)
 
@@ -149,7 +149,7 @@ var duplicateFoldersPanel: some View {
         }
     }
 
-var bottomSplitView: some View {
+    var bottomSplitView: some View {
         GeometryReader { geometry in
             HSplitView {
                 Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
@@ -190,7 +190,7 @@ var bottomSplitView: some View {
         .frame(minHeight: 320)
     }
 
-var previewPanel: some View {
+    var previewPanel: some View {
         VStack {
             if let row = selectedRow, !vm.cachedFlattened.isEmpty {
                 GeometryReader { geo in
@@ -220,10 +220,10 @@ var previewPanel: some View {
         }
     }
 
-// moved to AppViewModel
+    // moved to AppViewModel
 
 
-// moved to AppViewModel
+    // moved to AppViewModel
 
 
     func toggleSelectedRow() {
