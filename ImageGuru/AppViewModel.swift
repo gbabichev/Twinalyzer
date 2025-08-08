@@ -20,6 +20,13 @@ final class AppViewModel: ObservableObject {
     @Published var cachedClusters: [[String]] = []
     @Published var folderThumbs: [String: NSImage] = [:]
 
+    /// All folders that will be processed (selected roots + all subdirectories, unique, sorted)
+    var allFoldersBeingProcessed: [URL] {
+        let roots = selectedFolderURLs.map { $0.standardizedFileURL }
+        let all = Set(roots + ImageAnalyzer.recursiveSubdirectoriesExcludingRoots(under: roots))
+        return Array(all).sorted { $0.path < $1.path }
+    }
+
     // MARK: - Derived recompute
     func recomputeDerived() {
         // Flatten rows (exclude reference=similar)

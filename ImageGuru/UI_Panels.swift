@@ -12,6 +12,29 @@ extension ContentView {
                 ProgressView().frame(width: 320)
                 Text("Preparing…").foregroundStyle(.secondary)
             }
+            
+            //Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Processing Folders...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if vm.allFoldersBeingProcessed.isEmpty {
+                    Text("No folders selected.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView(showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(vm.allFoldersBeingProcessed, id: \.self) { url in
+                                Text(shortDisplayPath(for: url.path))
+                                    .font(.footnote)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 200)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
