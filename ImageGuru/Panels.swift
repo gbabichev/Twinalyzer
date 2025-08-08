@@ -5,7 +5,7 @@ extension ContentView {
 
 var processingView: some View {
         VStack(spacing: 16) {
-            if let p = processingProgress {
+            if let p = vm.processingProgress {
                 ProgressView(value: p).frame(width: 320)
                 Text("\(Int(p * 100))%").foregroundStyle(.secondary)
             } else {
@@ -36,13 +36,13 @@ var controlsPanel: some View {
             VStack(alignment: .leading, spacing: 20) {
                 HStack {
                     Button("Select Folders") { selectFolders() }
-                    Button("Analyze", action: processImages)
-                        .disabled(selectedFolderURLs.isEmpty)
+                    Button("Analyze") { vm.processImages(progress: { p in vm.processingProgress = p }) }
+                        .disabled(vm.selectedFolderURLs.isEmpty)
                 }
 
-                Toggle("Limit scan to selected folders only", isOn: $scanTopLevelOnly)
+                Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
 
-                Picker("", selection: $selectedAnalysisMode) {
+                Picker("", selection: $vm.selectedAnalysisMode) {
                     ForEach(AnalysisMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
@@ -51,15 +51,15 @@ var controlsPanel: some View {
 
                 VStack {
                     Text("Similarity Threshold")
-                    Slider(value: $similarityThreshold, in: 0.1...1.0, step: 0.1)
-                    Text(String(format: "%.0f%% (%@)", similarityThreshold * 100, sliderLabel(for: similarityThreshold)))
+                    Slider(value: $vm.similarityThreshold, in: 0.1...1.0, step: 0.1)
+                    Text(String(format: "%.0f%% (%@)", vm.similarityThreshold * 100, sliderLabel(vm.similarityThreshold)))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
 
                 if !selectedMatches.isEmpty {
                     Button(role: .destructive) {
-                        deleteSelectedMatches()
+                        vm.deleteSelectedMatches(selectedMatches: selectedMatches)
                     } label: {
                         Label("Delete Selected Matches (\(selectedMatches.count))", systemImage: "trash")
                     }
@@ -67,18 +67,18 @@ var controlsPanel: some View {
 
                 Divider()
 
-                if cachedFlattened.isEmpty {
+                if vm.cachedFlattened.isEmpty {
                     Text("No matches yet.").foregroundStyle(.secondary)
                 } else {
-                    Text("Number of matches found: \(cachedFlattened.count)")
+                    Text("Number of matches found: \(vm.cachedFlattened.count)")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
 
-                if selectedFolderURLs.isEmpty {
+                if vm.selectedFolderURLs.isEmpty {
                     Text("No folders selected.").foregroundStyle(.secondary)
                 } else {
-                    Text("Selected Folders:\n" + foldersToScanLabel)
+                    Text("Selected Folders:\n" + vm.foldersToScanLabel)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
@@ -95,15 +95,15 @@ var duplicateFoldersPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Duplicate Folder Groups").font(.headline)
 
-            if cachedClusters.isEmpty {
+            if vm.cachedClusters.isEmpty {
                 Text("No cross-folder duplicate relationships found.")
                     .foregroundStyle(.secondary)
             } else {
                 List {
-                    ForEach(Array(cachedClusters.enumerated()), id: \.offset) { index, cluster in
+                    ForEach(Array(vm.cachedClusters.enumerated()), id: \.offset) { index, cluster in
                         Section {
                             ForEach(cluster, id: \.self) { folder in
-                                Button(action: { openFolderInFinder(folder) }) {
+                                Button(action: { vm.openFolderInFinder(folder) }) {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(folder)
@@ -112,7 +112,7 @@ var duplicateFoldersPanel: some View {
                                         }
                                         Spacer()
                                         HStack(spacing: 8) {
-                                            if let img = folderThumbs[folder] {
+                                            if let img = vm.folderThumbs[folder] {
                                                 Image(nsImage: img)
                                                     .resizable()
                                                     .aspectRatio(contentMode: .fill)
@@ -124,7 +124,7 @@ var duplicateFoldersPanel: some View {
                                                             .stroke(Color.gray.opacity(0.25), lineWidth: 1)
                                                     )
                                             }
-                                            Text("\(cachedFolderDuplicateCount[folder, default: 0]) duplicates")
+                                            Text("\(vm.cachedFolderDuplicateCount[folder, default: 0]) duplicates")
                                                 .foregroundColor(.secondary)
                                                 .font(.footnote)
                                         }
@@ -192,26 +192,26 @@ var bottomSplitView: some View {
 
 var previewPanel: some View {
         VStack {
-            if let row = selectedRow, !cachedFlattened.isEmpty {
+            if let row = selectedRow, !vm.cachedFlattened.isEmpty {
                 GeometryReader { geo in
                     let maxDim = max(300, min(max(geo.size.width, geo.size.height), 1600))
                     HStack(alignment: .top, spacing: 20) {
                         VStack {
                             Text("Reference")
                             PreviewImage(path: row.reference, maxDimension: maxDim)
-                            Button("Delete Reference") { deleteFile(at: row.reference) }
+                            Button("Delete Reference") { vm.deleteFile(row.reference) }
                         }
                         VStack {
                             Text("Match")
                             PreviewImage(path: row.similar, maxDimension: maxDim)
-                            Button("Delete Match") { deleteFile(at: row.similar) }
+                            Button("Delete Match") { vm.deleteFile(row.similar) }
                         }
                     }
                 }
             } else {
                 ZStack {
                     VStack(spacing: 8) {
-                        Text(comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
+                        Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -220,230 +220,59 @@ var previewPanel: some View {
         }
     }
 
-func recomputeDerived() {
-        let flat: [TableRow] = comparisonResults.flatMap { result in
-            result.similars
-                .filter { $0.path != result.reference }
-                .map { TableRow(reference: result.reference, similar: $0.path, percent: $0.percent) }
-        }
-        cachedFlattened = flat
+// moved to AppViewModel
 
-        var folderCount: [String: Int] = [:]
-        var rep: [String: String] = [:]
-        for result in comparisonResults {
-            let allPaths = [result.reference] + result.similars.map { $0.path }
-            for path in allPaths {
-                let folder = URL(fileURLWithPath: path).deletingLastPathComponent().path
-                folderCount[folder, default: 0] += 1
-                if rep[folder] == nil { rep[folder] = path }
-            }
-        }
-        let filteredCount = folderCount.filter { $0.value > 1 }
-        cachedFolderDuplicateCount = filteredCount
-        cachedRepresentativeByFolder = rep.filter { filteredCount[$0.key] != nil }
 
-        var graph: [String: Set<String>] = [:]
-        for result in comparisonResults {
-            var foldersInResult = Set<String>()
-            foldersInResult.insert(URL(fileURLWithPath: result.reference).deletingLastPathComponent().path)
-            for s in result.similars {
-                foldersInResult.insert(URL(fileURLWithPath: s.path).deletingLastPathComponent().path)
-            }
-            let list = Array(foldersInResult)
-            for i in 0..<list.count {
-                for j in (i+1)..<list.count {
-                    graph[list[i], default: []].insert(list[j])
-                    graph[list[j], default: []].insert(list[i])
-                }
-            }
-        }
-        if graph.isEmpty {
-            cachedClusters = []
+// moved to AppViewModel
+
+
+    func toggleSelectedRow() {
+        guard let id = selectedRowID else { return }
+        if selectedRowIDs.contains(id) {
+            selectedRowIDs.remove(id)
         } else {
-            var visited = Set<String>(), clusters: [[String]] = []
-            for node in graph.keys.sorted() where !visited.contains(node) {
-                var stack = [node], comp: [String] = []
-                visited.insert(node)
-                while let v = stack.popLast() {
-                    comp.append(v)
-                    for n in graph[v, default: []] where !visited.contains(n) {
-                        visited.insert(n); stack.append(n)
-                    }
-                }
-                let pruned = comp.filter { cachedFolderDuplicateCount[$0, default: 0] > 1 }.sorted()
-                if !pruned.isEmpty { clusters.append(pruned) }
-            }
-            clusters.sort { $0.count != $1.count ? $0.count > $1.count : ($0.first ?? "") < ($1.first ?? "") }
-            cachedClusters = clusters
+            selectedRowIDs.insert(id)
         }
     }
 
-func processImages() {
-        guard !selectedFolderURLs.isEmpty else { return }
-        isProcessing = true
-        processingProgress = 0
-        comparisonResults = []
-        selectedRowIDs = []
-        folderThumbs.removeAll()
-        cachedFlattened = []
-        cachedFolderDuplicateCount = [:]
-        cachedRepresentativeByFolder = [:]
-        cachedClusters = []
+    // MARK: - UI helpers still owned by the view
 
-        let roots = selectedFolderURLs
-        let similarityScoreThreshold = similarityThreshold
-        let topOnly = scanTopLevelOnly
-
-        let onComplete: ([ImageComparisonResult]) -> Void = { results in
-            DispatchQueue.main.async {
-                self.comparisonResults = results
-                self.processingProgress = nil
-                self.isProcessing = false
-                self.recomputeDerived()
-                self.preloadAllFolderThumbnails()
-            }
-        }
-
-        switch selectedAnalysisMode {
-        case .perceptualHash:
-            ImageAnalyzer.analyzeImages(
-                inFolders: roots,
-                similarityThreshold: similarityScoreThreshold,
-                topLevelOnly: topOnly,
-                progress: { self.processingProgress = $0 },
-                completion: onComplete
-            )
-        case .deepFeature:
-            ImageAnalyzer.analyzeWithDeepFeatures(
-                inFolders: roots,
-                similarityThreshold: similarityScoreThreshold,
-                topLevelOnly: topOnly,
-                progress: { self.processingProgress = $0 },
-                completion: onComplete
-            )
-        }
-    }
-
-func selectFolders() {
+    func selectFolders() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
         panel.title = "Select Folders of Images"
+
         if panel.runModal() == .OK {
-            selectedFolderURLs = panel.urls
+            vm.selectedFolderURLs = panel.urls
             let leafs = findLeafFolders(from: panel.urls)
-            foldersToScanLabel = leafs.map { $0.lastPathComponent }.joined(separator: "\n")
-            comparisonResults = []
-            selectedRowIDs = []
-            folderThumbs.removeAll()
-            cachedFlattened = []
-            cachedFolderDuplicateCount = [:]
-            cachedRepresentativeByFolder = [:]
-            cachedClusters = []
+            vm.foldersToScanLabel = leafs.map { $0.lastPathComponent }.joined(separator: "\n")
+            vm.recomputeDerived()
+            vm.preloadAllFolderThumbnails()
         }
     }
 
-func preloadAllFolderThumbnails() {
-        folderThumbs.removeAll()
-        let folders = Array(cachedRepresentativeByFolder.keys)
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            var newThumbs: [String: NSImage] = [:]
-            newThumbs.reserveCapacity(folders.count)
-            for folder in folders {
-                if let path = cachedRepresentativeByFolder[folder],
-                   let img = downsampledNSImage(at: URL(fileURLWithPath: path), targetMaxDimension: 64) {
-                    newThumbs[folder] = img
-                }
-            }
-            DispatchQueue.main.async { folderThumbs = newThumbs }
-        }
+    /// Formats the similarity slider’s value as a percent label.
+    func sliderLabel(_ value: Double) -> String {
+        "\(Int(round(value * 100)))%"
     }
 
-func installSpacebarToggle() {
+    /// Returns true if the match is across different folders (used to tint cross‑folder rows).
+    func isCrossFolder(_ row: TableRow) -> Bool {
+        let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+        let simFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+        return refFolder != simFolder
+    }
+
+    func installSpacebarToggle() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 49, // space
-               let tableView = NSApp.keyWindow?.firstResponder as? NSTableView {
-                // Remember the exact table that had focus
+            // 49 = spacebar
+            if event.keyCode == 49 {
                 toggleSelectedRow()
-                DispatchQueue.main.async {
-                    NSApp.keyWindow?.makeFirstResponder(tableView)
-                }
-                return nil // consume
+                return nil // swallow the event so it doesn't scroll the view
             }
             return event
         }
     }
-
-func isCrossFolder(_ row: TableRow) -> Bool {
-        let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent()
-        let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent()
-        return refFolder != matchFolder
-    }
-
-func deleteSelectedMatches() {
-        for path in selectedMatches {
-            try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
-        }
-        for (index, var result) in comparisonResults.enumerated().reversed() {
-            let filteredSimilars = result.similars.filter { !selectedMatches.contains($0.path) }
-            let nonReferenceSimilars = filteredSimilars.filter { $0.path != result.reference }
-            if selectedMatches.contains(result.reference) || nonReferenceSimilars.isEmpty {
-                comparisonResults.remove(at: index)
-            } else if filteredSimilars.count != result.similars.count {
-                comparisonResults[index] = ImageComparisonResult(reference: result.reference, similars: filteredSimilars)
-            }
-        }
-        selectedRowIDs.removeAll()
-        toggleVersion += 1
-        recomputeDerived()
-        preloadAllFolderThumbnails()
-    }
-
-func deleteFile(at path: String) {
-        try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
-        for (index, var result) in comparisonResults.enumerated().reversed() {
-            let filteredSimilars = result.similars.filter { $0.path != path }
-            let nonReferenceSimilars = filteredSimilars.filter { $0.path != result.reference }
-            if result.reference == path || nonReferenceSimilars.isEmpty {
-                comparisonResults.remove(at: index)
-            } else if filteredSimilars.count != result.similars.count {
-                comparisonResults[index] = ImageComparisonResult(reference: result.reference, similars: filteredSimilars)
-            }
-        }
-        selectedRowIDs.remove(path)
-        toggleVersion += 1
-        recomputeDerived()
-        preloadAllFolderThumbnails()
-    }
-
-func findTableView(in view: NSView) -> NSTableView? {
-        if let table = view as? NSTableView { return table }
-        for sub in view.subviews {
-            if let t = findTableView(in: sub) { return t }
-        }
-        return nil
-    }
-
-// MARK: - Helpers required by panels
-
-func sliderLabel(for value: Double) -> String {
-    return String(format: "%.0f%%", value * 100)
-}
-
-func openFolderInFinder(_ folder: String) {
-    let url = URL(fileURLWithPath: folder, isDirectory: true)
-    NSWorkspace.shared.open(url)
-}
-
-func toggleSelectedRow() {
-    guard let id = selectedRowID else { return }
-    if selectedRowIDs.contains(id) {
-        selectedRowIDs.remove(id)
-    } else {
-        selectedRowIDs.insert(id)
-    }
-}
-
 }
