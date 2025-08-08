@@ -162,42 +162,44 @@ extension ContentView {
     }
 
     var bottomSplitView: some View {
-        GeometryReader { geometry in
-            HSplitView {
-                Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
-                    TableColumn("") { row in
-                        Toggle("", isOn: Binding(
-                            get: { selectedRowIDs.contains(row.id) },
-                            set: { isSelected in
-                                if isSelected { selectedRowIDs.insert(row.id) }
-                                else { selectedRowIDs.remove(row.id) }
-                                toggleVersion += 1
-                            }
-                        ))
-                        .toggleStyle(.checkbox)
-                        .labelsHidden()
-                    }
-                    .width(30)
-
-                    TableColumn("Reference", value: \.reference) { row in
-                        Text(row.reference)
-                            .foregroundStyle(isCrossFolder(row) ? .red : .primary)
-                    }
-
-                    TableColumn("Match", value: \.similar) { row in
-                        Text(row.similar)
-                            .foregroundStyle(isCrossFolder(row) ? .red : .primary)
-                    }
-
-                    TableColumn("Percent", value: \.percent) { row in
-                        Text("\(Int(row.percent * 100))%")
-                    }
-                    .width(70)
+        HSplitView {
+            // LEFT: table — flexible width, not fixed 50%
+            Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
+                TableColumn("") { row in
+                    Toggle("", isOn: Binding(
+                        get: { selectedRowIDs.contains(row.id) },
+                        set: { isSelected in
+                            if isSelected { selectedRowIDs.insert(row.id) }
+                            else { selectedRowIDs.remove(row.id) }
+                            toggleVersion += 1
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
                 }
-                .frame(width: geometry.size.width * 0.5)
+                .width(30)
 
-                previewPanel
+                TableColumn("Reference", value: \.reference) { row in
+                    Text(row.reference)
+                        .foregroundStyle(isCrossFolder(row) ? .red : .primary)
+                }
+
+                TableColumn("Match", value: \.similar) { row in
+                    Text(row.similar)
+                        .foregroundStyle(isCrossFolder(row) ? .red : .primary)
+                }
+
+                TableColumn("Percent", value: \.percent) { row in
+                    Text("\(Int(row.percent * 100))%")
+                }
+                .width(70)
             }
+            .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+
+            // RIGHT: preview — also flexible
+            previewPanel
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1) // bias growth toward the preview when space increases
         }
         .frame(minHeight: 320)
     }
@@ -206,31 +208,42 @@ extension ContentView {
         VStack {
             if let row = selectedRow, !vm.cachedFlattened.isEmpty {
                 GeometryReader { geo in
-                    let maxDim = max(300, min(max(geo.size.width, geo.size.height), 1600))
-                    HStack(alignment: .top, spacing: 20) {
-                        VStack {
+                    // Available width for two images, minus spacing & some padding
+                    let spacing: CGFloat = 20
+                    let inset: CGFloat = 16
+                    let twoColumnWidth = max(0, geo.size.width - spacing - inset * 2)
+                    let singleColumn = twoColumnWidth / 2
+
+                    // Use the smaller of width/height so images fit in both axes
+                    let maxDim = max(200, min(singleColumn, geo.size.height - 80)) // the -80 gives room for labels/buttons
+
+                    HStack(alignment: .top, spacing: spacing) {
+                        VStack(spacing: 8) {
                             Text("Reference")
                             PreviewImage(path: row.reference, maxDimension: maxDim)
+                                .frame(width: maxDim, height: maxDim)
+                                .clipped()
                             Button("Delete Reference") { vm.deleteFile(row.reference) }
                         }
-                        VStack {
+                        VStack(spacing: 8) {
                             Text("Match")
                             PreviewImage(path: row.similar, maxDimension: maxDim)
+                                .frame(width: maxDim, height: maxDim)
+                                .clipped()
                             Button("Delete Match") { vm.deleteFile(row.similar) }
                         }
                     }
+                    .padding(inset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             } else {
-                ZStack {
-                    VStack(spacing: 8) {
-                        Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                VStack(spacing: 8) {
+                    Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
-
 
 }
