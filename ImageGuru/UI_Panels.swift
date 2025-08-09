@@ -86,26 +86,33 @@ extension ContentView {
                     }
                 }
                 .pickerStyle(.inline)
-
+                
                 VStack {
                     Text("Similarity Threshold")
-                    Slider(value: $vm.similarityThreshold, in: 0.1...1.0)
-                        .overlay(
-                            HStack {
-                                ForEach(Array(stride(from: 0.1, through: 1.0, by: 0.05)), id: \.self) { _ in
-                                    Spacer()
-                                    Rectangle()
-                                        .fill(Color.gray.opacity(0.3))
-                                        .frame(width: 1, height: 8)
-                                    Spacer()
-                                }
-                            }
-                        )
-
-                    Text(String(format: "%.0f%%", vm.similarityThreshold * 100, sliderLabel(vm.similarityThreshold)))
+                    Slider(value: $vm.similarityThreshold, in: 0.45...1.0, step: 0.025)
+                    Text(String(format: "%.0f%%", vm.similarityThreshold * 100))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+//                VStack {
+//                    Text("Similarity Threshold")
+//                    Slider(value: $vm.similarityThreshold, in: 0.1...1.0)
+//                        .overlay(
+//                            HStack {
+//                                ForEach(Array(stride(from: 0.1, through: 1.0, by: 0.05)), id: \.self) { _ in
+//                                    Spacer()
+//                                    Rectangle()
+//                                        .fill(Color.gray.opacity(0.3))
+//                                        .frame(width: 1, height: 8)
+//                                    Spacer()
+//                                }
+//                            }
+//                        )
+//
+//                    Text(String(format: "%.0f%%", vm.similarityThreshold * 100, sliderLabel(vm.similarityThreshold)))
+//                        .font(.footnote)
+//                        .foregroundStyle(.secondary)
+//                }
 
                 if !selectedMatches.isEmpty {
                     Button(role: .destructive) {

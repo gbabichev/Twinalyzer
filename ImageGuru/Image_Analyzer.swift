@@ -24,6 +24,36 @@ struct ImageAnalyzer {
 
     // MARK: - File enumeration
 
+    /// Expand selected roots into actual folders to scan.
+    static func foldersToScan(from roots: [URL]) -> [URL] {
+        let fm = FileManager.default
+        var out: [URL] = []
+        out.reserveCapacity(256)
+
+        for root in roots.map(\.standardizedFileURL) {
+            // enumerate immediate subdirectories
+            let subs: [URL] = (try? fm.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ))?.filter {
+                (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            } ?? []
+
+            if subs.isEmpty {
+                // leaf folder → scan it
+                out.append(root)
+            } else {
+                // root with subfolders → scan subfolders only
+                out.append(contentsOf: subs)
+            }
+        }
+
+        // unique + stable order
+        return Array(Set(out.map(\.standardizedFileURL))).sorted { $0.path < $1.path }
+    }
+
+    
     /// All image files (recursive) in a directory.
     static func allImageFiles(in directory: URL) -> [URL] {
         let fm = FileManager.default
@@ -266,9 +296,8 @@ struct ImageAnalyzer {
             var results: [ImageComparisonResult] = []
 
             // Process all subfolders AND root folders (if selected).
-            let subdirs = Array(
-                Set(roots.map(\.standardizedFileURL) + recursiveSubdirectoriesExcludingRoots(under: roots))
-            ).sorted { $0.path < $1.path }
+            let subdirs = foldersToScan(from: roots)
+
             
             if topLevelOnly {
                 // A) Compare within each subfolder independently (no cross-folder matches)

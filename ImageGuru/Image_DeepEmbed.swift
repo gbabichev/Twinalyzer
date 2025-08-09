@@ -56,49 +56,48 @@ extension ImageAnalyzer {
             similarityScore(embeddings[i].observation, embeddings[j].observation)
         }
 
-        // Pick a stable, “best” reference inside a group.
-        // 1) Prefer any exact-duplicate (≈1.0 similarity) pair.
-        // 2) Otherwise pick the node with highest average similarity to others.
-        func chooseReference(in indices: [Int]) -> Int {
-            guard indices.count > 1 else { return indices.first! }
-
-            // Prefer an exact pair if present.
-            let exactEps = 0.9999
-            for a in 0..<indices.count {
-                for b in (a+1)..<indices.count {
-                    if sim(indices[a], indices[b]) >= exactEps {
-                        // deterministic choice for stability
-                        let ia = indices[a], ib = indices[b]
+        // Choose a stable reference. Prefer any member that participates in a near‑exact pair.
+        func chooseReference(in idxs: [Int]) -> Int {
+            let exactEps = 0.9995
+            var candidate: Int? = nil
+            for a in 0..<idxs.count {
+                for b in (a+1)..<idxs.count {
+                    if sim(idxs[a], idxs[b]) >= exactEps {
+                        // deterministic pick for stability
+                        let ia = idxs[a], ib = idxs[b]
                         let pa = embeddings[ia].url.path
                         let pb = embeddings[ib].url.path
-                        return (pa <= pb) ? ia : ib
+                        candidate = (pa <= pb) ? ia : ib
+                        break
                     }
                 }
+                if candidate != nil { break }
             }
-
-            // Fall back: highest average similarity to the group.
-            var bestIdx = indices[0]
-            var bestAvg = -Double.infinity
-            for i in indices {
-                var total = 0.0
-                var count = 0.0
-                for j in indices where j != i {
-                    total += sim(i, j)
-                    count += 1.0
-                }
-                let avg = total / max(1.0, count)
-                if avg > bestAvg { bestAvg = avg; bestIdx = i }
-            }
-            return bestIdx
+            return candidate ?? idxs.min { embeddings[$0].url.path < embeddings[$1].url.path }!
         }
 
+        // Compute best-in-group similarity for each member (max vs any other).
+        func bestSims(in idxs: [Int]) -> [Int: Double] {
+            var best: [Int: Double] = [:]
+            for i in 0..<idxs.count {
+                let ii = idxs[i]
+                var m = 0.0
+                for j in 0..<idxs.count where j != i {
+                    m = max(m, sim(ii, idxs[j]))
+                }
+                best[ii] = m
+            }
+            return best
+        }
+
+        let exactEps = 0.9995
         var used = Set<Int>()
         var results: [ImageComparisonResult] = []
 
-        // Build groups greedily (as before)…
         for i in 0..<embeddings.count {
             guard !used.contains(i) else { continue }
 
+            // Greedy build (same as before)
             var members = [i]
             for j in (i + 1)..<embeddings.count where !used.contains(j) {
                 if sim(i, j) >= threshold {
@@ -107,26 +106,28 @@ extension ImageAnalyzer {
                 }
             }
             used.insert(i)
-
             guard members.count > 1 else { continue }
 
-            // …then re-anchor the group to preserve exact matches.
+            // Re-anchor to a good reference and compute best-in-group sims
             let refIdx = chooseReference(in: members)
             let refPath = embeddings[refIdx].url.path
+            let best = bestSims(in: members)
 
-            var pairs: [(path: String, percent: Double)] = []
-            pairs.reserveCapacity(members.count)
-
-            // Reference first at 1.0, then others sorted by similarity desc
-            pairs.append((refPath, 1.0))
+            // Build output: reference first (1.0), then others sorted by displayed percent
+            var rows: [(path: String, percent: Double)] = []
+            rows.append((refPath, 1.0))
             var tail: [(path: String, percent: Double)] = []
+
             for idx in members where idx != refIdx {
-                tail.append((embeddings[idx].url.path, sim(refIdx, idx)))
+                // Display the best similarity this item has with anyone in the group.
+                var p = best[idx] ?? 0.0
+                if p >= exactEps { p = 1.0 } // snap near-1.0 to 1.0
+                tail.append((embeddings[idx].url.path, p))
             }
             tail.sort { $0.percent > $1.percent }
-            pairs.append(contentsOf: tail)
+            rows.append(contentsOf: tail)
 
-            results.append(ImageComparisonResult(reference: refPath, similars: pairs))
+            results.append(ImageComparisonResult(reference: refPath, similars: rows))
         }
 
         return results
@@ -176,9 +177,8 @@ extension ImageAnalyzer {
             var results: [ImageComparisonResult] = []
 
             // Process all subfolders AND root folders (if selected).
-            let subdirs = Array(
-                Set(roots.map(\.standardizedFileURL) + recursiveSubdirectoriesExcludingRoots(under: roots))
-            ).sorted { $0.path < $1.path }
+            let subdirs = foldersToScan(from: roots)
+
             
             if topLevelOnly {
                 // A) Compare within each subfolder only
