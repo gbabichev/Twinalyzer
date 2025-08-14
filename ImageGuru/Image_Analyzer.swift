@@ -397,7 +397,7 @@ public enum ImageAnalyzer {
 
         var done = 0
         for url in urls {
-            if let hash = subjectBlockHash(for: url) ?? blockHash(for: url) {
+            if let hash = blockHash(for: url) {
                 hashes.append((url: url.path, hash: hash))
             }
             done += 1
@@ -471,36 +471,44 @@ public enum ImageAnalyzer {
 
     // MARK: File enumeration
 
-    public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
-        var results: [URL] = []
-        let fm = FileManager.default
-        if let e = fm.enumerator(at: directory,
-                                 includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
-                                 options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
-            for case let url as URL in e {
-                guard allowedImageExtensions.contains(url.pathExtension.lowercased()) else { continue }
-                results.append(url)
-            }
+    
+public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
+    var results: [URL] = []
+    let fm = FileManager.default
+    if let e = fm.enumerator(at: directory,
+                             includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
+                             options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
+        for case let url as URL in e {
+            guard let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
+                  (rv.isRegularFile ?? false),
+                  !(rv.isHidden ?? false),
+                  allowedImageExtensions.contains(url.pathExtension.lowercased())
+            else { continue }
+            results.append(url)
         }
-        return results
     }
+    return results
+}
 
-    public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(at: directory,
-                                                         includingPropertiesForKeys: [.isRegularFileKey],
-                                                         options: [.skipsHiddenFiles]) else { return [] }
-        return contents.filter { allowedImageExtensions.contains($0.pathExtension.lowercased()) }
+
+    
+public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
+    let fm = FileManager.default
+    guard let contents = try? fm.contentsOfDirectory(at: directory,
+                                                     includingPropertiesForKeys: [.isRegularFileKey],
+                                                     options: [.skipsHiddenFiles]) else { return [] }
+    return contents.filter {
+        (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true &&
+        allowedImageExtensions.contains($0.pathExtension.lowercased())
     }
+}
+
 
     private nonisolated static let allowedImageExtensions: Set<String> = [
-        "jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp"
+        "jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"
     ]
 
     // MARK: Hashing
-
-    public nonisolated static func subjectBlockHash(for imageURL: URL) -> UInt64? { nil }
-
     public nonisolated static func blockHash(for cgImage: CGImage) -> UInt64? {
         let w = 8, h = 8
         guard let ctx = CGContext(
@@ -526,7 +534,7 @@ public enum ImageAnalyzer {
     }
 
     public nonisolated static func blockHash(for imageURL: URL) -> UInt64? {
-        guard let cg = downsampledCGImage(from: imageURL, to: CGSize(width: 256, height: 256)) else { return nil }
+        guard let cg = downsampledCGImage(from: imageURL, to: CGSize(width: 32, height: 32)) else { return nil }
         return blockHash(for: cg)
     }
 
@@ -536,16 +544,19 @@ public enum ImageAnalyzer {
 
     // MARK: Downsampling
 
-    public nonisolated static func downsampledCGImage(from url: URL, to size: CGSize) -> CGImage? {
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let maxDimension = Int(max(size.width, size.height))
-        let opts: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxDimension
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
-    }
+    
+public nonisolated static func downsampledCGImage(from url: URL, to size: CGSize) -> CGImage? {
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let maxDimension = Int(max(size.width, size.height))
+    let opts: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceShouldCache: false,
+        kCGImageSourceShouldCacheImmediately: false,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxDimension
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+}
+
 }
 
