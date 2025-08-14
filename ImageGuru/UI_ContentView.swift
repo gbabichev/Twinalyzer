@@ -8,7 +8,27 @@ enum AnalysisMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+
+/// A sendable sort comparator that wraps a key path.
+//struct SendableKeyPathComparator<Root, Value: Comparable>: SortComparator, @unchecked Sendable {
+//    let keyPath: KeyPath<Root, Value>
+//    var order: SortOrder = .forward
+//
+//    func compare(_ lhs: Root, _ rhs: Root) -> ComparisonResult {
+//        let a = lhs[keyPath: keyPath]
+//        let b = rhs[keyPath: keyPath]
+//        if a == b { return .orderedSame }
+//        let asc = a < b
+//        switch order {
+//        case .forward: return asc ? .orderedAscending : .orderedDescending
+//        case .reverse: return asc ? .orderedDescending : .orderedAscending
+//        }
+//    }
+//}
+
+
 /// Root view using a lightweight state and a dedicated AppViewModel for data/logic.
+
 struct ContentView: View {
     @StateObject var vm = AppViewModel()
 
@@ -16,13 +36,10 @@ struct ContentView: View {
     @State var selectedRowID: String? = nil
     @State var selectedRowIDs: Set<String> = []
     @State var toggleVersion = 0
-    @State var sortOrder: [KeyPathComparator<TableRow>] = [
-        .init(\.percent, order: .reverse)
-    ]
 
     var sortedRows: [TableRow] {
         var rows = vm.cachedFlattened
-        rows.sort(using: sortOrder)
+        //rows.sort(using: sortOrder)
         return rows
     }
 

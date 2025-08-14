@@ -61,22 +61,29 @@ struct PreviewImage: View {
 
     private func load() async {
         let key = cacheKey as NSString
+
+        // Serve from cache immediately, on main.
         if let cached = ImageCache.shared.object(forKey: key) {
-            setImage(cached)
+            await setImage(cached)
             return
         }
+
         let bucket = Self.bucket(for: maxDimension)
         let url = URL(fileURLWithPath: path)
 
-        let ns: NSImage? = await withCheckedContinuation { cont in
+        // Do the decoding off-main
+        let cg: CGImage? = await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                let ns = downsampledNSImage(at: url, targetMaxDimension: CGFloat(bucket))
-                cont.resume(returning: ns)
+                cont.resume(returning: downsampledCGImage(at: url, targetMaxDimension: CGFloat(bucket)))
             }
         }
 
-        if let ns { ImageCache.shared.setObject(ns, forKey: key) }
-        setImage(ns)
+        // Build NSImage and publish on main
+        await MainActor.run {
+            let ns = cg.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+            if let ns { ImageCache.shared.setObject(ns, forKey: key) }
+            self.image = ns
+        }
     }
 }
 

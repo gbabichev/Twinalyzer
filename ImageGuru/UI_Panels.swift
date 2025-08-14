@@ -215,7 +215,7 @@ extension ContentView {
     var bottomSplitView: some View {
         HSplitView {
             // LEFT: table — flexible width, not fixed 50%
-            Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
+            Table(sortedRows, selection: $selectedRowID) {
                 TableColumn("") { row in
                     Toggle("", isOn: Binding(
                         get: { selectedRowIDs.contains(row.id) },
@@ -230,17 +230,17 @@ extension ContentView {
                 }
                 .width(30)
 
-                TableColumn("Reference", value: \.reference) { row in
+                TableColumn("Reference") { row in
                     Text(shortDisplayPath(for: row.reference))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
 
-                TableColumn("Match", value: \.similar) { row in
+                TableColumn("Match") { row in
                     Text(shortDisplayPath(for: row.similar))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
 
-                TableColumn("Percent", value: \.percent) { row in
+                TableColumn("Percent") { row in
                     Text("\(Int(row.percent * 100))%")
                 }
                 .width(70)
@@ -250,9 +250,8 @@ extension ContentView {
             // RIGHT: preview — also flexible
             previewPanel
                 .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                .layoutPriority(1) // bias growth toward the preview when space increases
+                .layoutPriority(1)
         }
-        //.frame(minHeight: 320)
     }
 
     var previewPanel: some View {
