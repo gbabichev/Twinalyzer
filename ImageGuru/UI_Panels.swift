@@ -13,7 +13,6 @@ extension ContentView {
                 Text("Preparing…").foregroundStyle(.secondary)
             }
             
-            //Divider()
             VStack(alignment: .leading, spacing: 6) {
                 Text("Processing Folders...")
                     .font(.subheadline)
@@ -36,14 +35,12 @@ extension ContentView {
                 }
             }
             
-            //Spacer(minLength: 12)
             Button("Cancel") {
                 vm.cancelAnalysis()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(!vm.isProcessing)
-            
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -67,11 +64,10 @@ extension ContentView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 12) {
                     Button("Select Folders") { selectFolders() }
-                        .frame(maxWidth: .infinity, minHeight: 44) // full width share + taller
-                        //.buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
 
                     Button("Analyze") {
-                        vm.processImages(progress: { _ in })
+                        vm.processImages(progress: { _ in })  // Simplified progress callback
                     }
                     .disabled(vm.selectedFolderURLs.isEmpty)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -106,10 +102,10 @@ extension ContentView {
 
                 Divider()
 
-                if vm.cachedFlattened.isEmpty {
+                if vm.flattenedResults.isEmpty {  // Changed from vm.cachedFlattened
                     Text("No matches yet.").foregroundStyle(.secondary)
                 } else {
-                    Text("Number of matches found: \(vm.cachedFlattened.count)")
+                    Text("Number of matches found: \(vm.flattenedResults.count)")  // Changed from vm.cachedFlattened
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -117,7 +113,7 @@ extension ContentView {
                 if vm.selectedFolderURLs.isEmpty {
                     Text("No folders selected.").foregroundStyle(.secondary)
                 } else {
-                    Text("Selected Folders:\n" + vm.foldersToScanLabel)
+                    Text("Selected Folders:\n" + vm.foldersToScanLabel)  // Now computed property
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
@@ -134,17 +130,16 @@ extension ContentView {
         VStack(alignment: .leading, spacing: 16) {
             Text("Duplicate Folder Groups").font(.headline)
 
-            if vm.cachedClusters.isEmpty {
+            if vm.folderClusters.isEmpty {  // Changed from vm.cachedClusters
                 Text("No cross-folder duplicate relationships found.")
                     .foregroundStyle(.secondary)
             } else {
                 List {
-                    ForEach(vm.cachedClusters.indices, id: \.self) { i in
+                    ForEach(vm.folderClusters.indices, id: \.self) { i in  // Changed from vm.cachedClusters
                         Section {
-                            ForEach(vm.cachedClusters[i], id: \.self) { folder in
+                            ForEach(vm.folderClusters[i], id: \.self) { folder in  // Changed from vm.cachedClusters
                                 Button(action: { vm.openFolderInFinder(folder) }) {
                                     HStack(alignment: .center, spacing: 12) {
-                                        // inline short name: "parent/filename"
                                         let url = URL(fileURLWithPath: folder)
                                         let name = url.lastPathComponent
                                         let parent = url.deletingLastPathComponent().lastPathComponent
@@ -155,19 +150,8 @@ extension ContentView {
                                         Spacer(minLength: 12)
 
                                         HStack(spacing: 8) {
-                                            if let img = vm.folderThumbs[folder] {
-                                                Image(nsImage: img)
-                                                    .resizable()
-                                                    .aspectRatio(contentMode: .fill)
-                                                    .frame(width: 36, height: 36)
-                                                    .clipped()
-                                                    .cornerRadius(4)
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: 4)
-                                                            .stroke(Color.gray.opacity(0.25), lineWidth: 1)
-                                                    )
-                                            }
-                                            Text("\(vm.cachedFolderDuplicateCount[folder, default: 0]) duplicates")
+                                            // Removed thumbnail loading for now - can add simple on-demand loading later
+                                            Text("\(vm.folderDuplicateCounts[folder, default: 0]) duplicates")  // Changed from vm.cachedFolderDuplicateCount
                                                 .foregroundStyle(.secondary)
                                                 .font(.footnote)
                                         }
@@ -180,14 +164,13 @@ extension ContentView {
                             HStack {
                                 Text("Group \(i + 1)")
                                 Spacer()
-                                Text("\(vm.cachedClusters[i].count) folder\(vm.cachedClusters[i].count == 1 ? "" : "s")")
+                                Text("\(vm.folderClusters[i].count) folder\(vm.folderClusters[i].count == 1 ? "" : "s")")  // Changed from vm.cachedClusters
                                     .foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
                 .frame(minHeight: 240)
-
             }
             Spacer()
         }
@@ -195,20 +178,18 @@ extension ContentView {
 
     var bottomSplitView: some View {
         HSplitView {
-            // LEFT: table — flexible width, not fixed 50%
+            // LEFT: table
             Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
                 TableColumn("Reference", value: \.reference) { row in
                     Text(shortDisplayPath(for: row.reference))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
 
-                // Match — sortable + colored cell
                 TableColumn("Match", value: \.similar) { row in
                     Text(shortDisplayPath(for: row.similar))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
 
-                // Percent — sortable by hidden padded key, displays “78%”
                 TableColumn("Percent", value: \.percentSortKey) { row in
                     Text(row.percentDisplay)
                 }
@@ -216,7 +197,7 @@ extension ContentView {
             }
             .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
 
-            // RIGHT: preview — also flexible
+            // RIGHT: preview
             previewPanel
                 .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
@@ -225,25 +206,19 @@ extension ContentView {
 
     var previewPanel: some View {
         VStack {
-            if let row = selectedRow, !vm.cachedFlattened.isEmpty {
+            if let row = selectedRow, !vm.flattenedResults.isEmpty {  // Changed from vm.cachedFlattened
                 GeometryReader { geo in
-                    // Available width for two images, minus spacing & some padding
                     let spacing: CGFloat = 20
                     let inset: CGFloat = 16
                     let twoColumnWidth = max(0, geo.size.width - spacing - inset * 2)
                     let singleColumn = twoColumnWidth / 2
-
-                    // Use the smaller of width/height so images fit in both axes
-                    let maxDim = min(singleColumn, geo.size.height - 120) // bumped padding to give more room
-
+                    let maxDim = min(singleColumn, geo.size.height - 120)
 
                     HStack(alignment: .top, spacing: spacing) {
                         VStack(spacing: 8) {
                             Text("Reference")
                             Text(shortDisplayPath(for: row.reference))
-                                //.foregroundStyle(isCrossFolder(row) ? .red : .primary)
                             PreviewImage(path: row.reference, maxDimension: maxDim)
-                                //.frame(width: maxDim, height: maxDim)
                                 .clipped()
                             Button("Delete Reference") { vm.deleteFile(row.reference) }
                         }
@@ -252,7 +227,6 @@ extension ContentView {
                             Text(shortDisplayPath(for: row.similar))
                                 .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                             PreviewImage(path: row.similar, maxDimension: maxDim)
-                                //.frame(width: maxDim, height: maxDim)
                                 .clipped()
                             Button("Delete Match") { vm.deleteFile(row.similar) }
                         }
@@ -269,15 +243,10 @@ extension ContentView {
             }
         }
     }
-
 }
+
 extension TableRow {
-    /// Integer percent (0...100), rounded
     var percentInt: Int { Int((percent * 100).rounded()) }
-
-    /// Used internally for sorting — strings sort fine if zero-padded
     var percentSortKey: String { String(format: "%03d", percentInt) }
-
-    /// What the user actually sees in the table
     var percentDisplay: String { "\(percentInt)%" }
 }

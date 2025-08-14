@@ -18,7 +18,7 @@ extension ContentView {
         } else {
             selectedRowIDs.insert(id)
         }
-    }    
+    }
     
     func selectFolders() {
         let panel = NSOpenPanel()
@@ -29,14 +29,12 @@ extension ContentView {
 
         if panel.runModal() == .OK {
             vm.selectedFolderURLs = panel.urls
-            let leafs = findLeafFolders(from: panel.urls)
-            vm.foldersToScanLabel = leafs.map { $0.lastPathComponent }.joined(separator: "\n")
-            vm.recomputeDerived()
-            vm.preloadAllFolderThumbnails()
+            // Removed manual foldersToScanLabel setting since it's now computed
+            // Removed recomputeDerived() and preloadAllFolderThumbnails() since they're eliminated
         }
     }
 
-    /// Formats the similarity slider’s value as a percent label.
+    /// Formats the similarity slider's value as a percent label.
     func sliderLabel(_ value: Double) -> String {
         "\(Int(round(value * 100)))%"
     }
@@ -71,7 +69,7 @@ extension ContentView {
         return leafFolders
     }
     
-    /// Returns true if the match is across different folders (used to tint cross‑folder rows).
+    /// Returns true if the match is across different folders (used to tint cross-folder rows).
     func isCrossFolder(_ row: TableRow) -> Bool {
         let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
         let simFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
@@ -98,10 +96,4 @@ extension ContentView {
             return url.lastPathComponent
         }
     }
-
-    
-    
-    
-    
 }
-
