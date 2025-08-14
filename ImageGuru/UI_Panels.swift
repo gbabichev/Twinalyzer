@@ -215,33 +215,21 @@ extension ContentView {
     var bottomSplitView: some View {
         HSplitView {
             // LEFT: table — flexible width, not fixed 50%
-            Table(sortedRows, selection: $selectedRowID) {
-                TableColumn("") { row in
-                    Toggle("", isOn: Binding(
-                        get: { selectedRowIDs.contains(row.id) },
-                        set: { isSelected in
-                            if isSelected { selectedRowIDs.insert(row.id) }
-                            else { selectedRowIDs.remove(row.id) }
-                            toggleVersion += 1
-                        }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
-                }
-                .width(30)
-
-                TableColumn("Reference") { row in
+            Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
+                TableColumn("Reference", value: \.reference) { row in
                     Text(shortDisplayPath(for: row.reference))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
 
-                TableColumn("Match") { row in
+                // Match — sortable + colored cell
+                TableColumn("Match", value: \.similar) { row in
                     Text(shortDisplayPath(for: row.similar))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
 
-                TableColumn("Percent") { row in
-                    Text("\(Int(row.percent * 100))%")
+                // Percent — sortable by hidden padded key, displays “78%”
+                TableColumn("Percent", value: \.percentSortKey) { row in
+                    Text(row.percentDisplay)
                 }
                 .width(70)
             }
@@ -301,4 +289,14 @@ extension ContentView {
         }
     }
 
+}
+extension TableRow {
+    /// Integer percent (0...100), rounded
+    var percentInt: Int { Int((percent * 100).rounded()) }
+
+    /// Used internally for sorting — strings sort fine if zero-padded
+    var percentSortKey: String { String(format: "%03d", percentInt) }
+
+    /// What the user actually sees in the table
+    var percentDisplay: String { "\(percentInt)%" }
 }

@@ -36,11 +36,13 @@ struct ContentView: View {
     @State var selectedRowID: String? = nil
     @State var selectedRowIDs: Set<String> = []
     @State var toggleVersion = 0
+    @State var sortOrder: [KeyPathComparator<TableRow>] = []
 
+    
     var sortedRows: [TableRow] {
         let rows = vm.cachedFlattened
-        //rows.sort(using: sortOrder)
-        return rows
+        guard !sortOrder.isEmpty else { return rows }   // no initial sort
+        return rows.sorted(using: sortOrder)
     }
 
     var selectedRow: TableRow? {
