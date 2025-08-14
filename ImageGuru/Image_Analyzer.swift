@@ -1,6 +1,6 @@
 //
 //  Image_Analyzer.swift
-//  Swift 6–ready, deep embed merged (race-free)
+//  Swift 6–ready, deep embed merged (race-free) - FIXED VERSION
 //
 
 import Foundation
@@ -91,10 +91,12 @@ public enum ImageAnalyzer {
             var rows: [TableRow] = []
             for dir in subdirs {
                 let files = topLevelImageFiles(in: dir)
+                var localDone = 0
                 let pairs = hashAndPair(urls: files, maxDist: maxDist) { done, total in
-                    processed += done
-                    tick(processed, max(totalImages, total), emit)
+                    localDone = done
+                    tick(processed + localDone, max(totalImages, total), emit)
                 }
+                processed += localDone
                 rows.append(contentsOf: pairs)
             }
             rows.sort { $0.percent > $1.percent }
@@ -112,9 +114,9 @@ public enum ImageAnalyzer {
         }
     }
 
-    // MARK: Public API (Deep Features, merged, Swift 6-safe)
-    /// Runs Vision work (feature prints + clustering) on the MainActor to satisfy Swift 6’s isolation.
-    /// All FS work and progress throttling remain background-safe.
+    // MARK: Public API (Deep Features, merged, Swift 6-safe) - FIXED VERSION
+    /// Runs Vision work on background threads and only uses MainActor for progress updates.
+    /// This prevents UI blocking and allows smooth progress bar updates.
     public nonisolated static func analyzeWithDeepFeatures(
         inFolders roots: [URL],
         similarityThreshold: Double,
@@ -142,30 +144,47 @@ public enum ImageAnalyzer {
                 var processed = 0
 
                 for dir in subdirs {
-                    if shouldCancel?() == true { await MainActor.run { completion([]) }; return }
+                    if shouldCancel?() == true {
+                        await MainActor.run { completion([]) }
+                        return
+                    }
 
                     let files = topLevelImageFiles(in: dir)
                     guard !files.isEmpty else { continue }
 
-                    // ➜ Vision extraction + clustering on MainActor
-                    let folderBlock = await MainActor.run { () -> (res: [ImageComparisonResult], newProcessed: Int) in
-                        var localProcessed = processed
-                        let (obs, paths) = Self._makeFeaturePrints(for: files, progress: {
-                            // This closure is NOT @Sendable and runs on MainActor synchronously.
-                            localProcessed += 1
-                            if let emit { emit(Double(localProcessed) / Double(max(totalImages, 1))) }
-                        })
-                        let res = Self._clusterFeaturePrints(observations: obs, paths: paths, threshold: similarityThreshold)
-                        return (res, localProcessed)
+                    // ➜ Vision extraction on BACKGROUND thread with async progress updates
+                    let (observations, paths) = await _makeFeaturePrintsAsync(
+                        for: files,
+                        processedSoFar: processed,
+                        totalImages: totalImages,
+                        emit: emit,
+                        shouldCancel: shouldCancel
+                    )
+                    
+                    if shouldCancel?() == true {
+                        await MainActor.run { completion([]) }
+                        return
                     }
-                    processed = folderBlock.newProcessed
-                    if !folderBlock.res.isEmpty { results.append(contentsOf: folderBlock.res) }
+                    
+                    processed += files.count
+
+                    // ➜ Clustering can stay on MainActor since it's fast
+                    let folderResults = await MainActor.run {
+                        Self._clusterFeaturePrints(observations: observations, paths: paths, threshold: similarityThreshold)
+                    }
+                    
+                    if !folderResults.isEmpty {
+                        results.append(contentsOf: folderResults)
+                    }
                 }
             } else {
                 // gather all images
                 var imageFiles: [URL] = []
                 for d in subdirs {
-                    if shouldCancel?() == true { await MainActor.run { completion([]) }; return }
+                    if shouldCancel?() == true {
+                        await MainActor.run { completion([]) }
+                        return
+                    }
                     imageFiles.append(contentsOf: allImageFiles(in: d))
                 }
 
@@ -178,18 +197,30 @@ public enum ImageAnalyzer {
                     return
                 }
 
-                // ➜ Vision extraction + clustering on MainActor
+                // ➜ Vision extraction on BACKGROUND thread with async progress updates
+                let (observations, paths) = await _makeFeaturePrintsAsync(
+                    for: imageFiles,
+                    processedSoFar: 0,
+                    totalImages: total,
+                    emit: emit,
+                    shouldCancel: shouldCancel
+                )
+                
+                if shouldCancel?() == true {
+                    await MainActor.run { completion([]) }
+                    return
+                }
+
+                // ➜ Clustering on MainActor
                 results = await MainActor.run {
-                    var localProcessed = 0
-                    let (obs, paths) = Self._makeFeaturePrints(for: imageFiles, progress: {
-                        localProcessed += 1
-                        emit?(Double(localProcessed) / Double(total))
-                    })
-                    return Self._clusterFeaturePrints(observations: obs, paths: paths, threshold: similarityThreshold)
+                    Self._clusterFeaturePrints(observations: observations, paths: paths, threshold: similarityThreshold)
                 }
             }
 
-            if shouldCancel?() == true { await MainActor.run { completion([]) }; return }
+            if shouldCancel?() == true {
+                await MainActor.run { completion([]) }
+                return
+            }
 
             await MainActor.run {
                 emit?(1.0)
@@ -263,12 +294,76 @@ public enum ImageAnalyzer {
         }
     }
 
+    /// FIXED: Build feature prints for URLs on BACKGROUND thread with async progress updates.
+    /// This prevents UI blocking and allows smooth progress updates.
+    /// Returns parallel arrays: observations[i] corresponds to paths[i].
+    private nonisolated static func _makeFeaturePrintsAsync(
+        for urls: [URL],
+        processedSoFar: Int,
+        totalImages: Int,
+        emit: (@Sendable (Double) -> Void)?,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> ([VNFeaturePrintObservation], [String]) {
+        
+        var observations: [VNFeaturePrintObservation] = []
+        observations.reserveCapacity(urls.count)
+        var paths: [String] = []
+        paths.reserveCapacity(urls.count)
+
+        let batchSize = 10 // Process images in batches to yield control
+        
+        for (index, url) in urls.enumerated() {
+            if shouldCancel?() == true {
+                break
+            }
+            
+            // Process image on background thread
+            await Task.yield() // Yield control periodically
+            
+            let result: (VNFeaturePrintObservation?, String?) = await withCheckedContinuation { continuation in
+                autoreleasepool {
+                    let req = VNGenerateImageFeaturePrintRequest()
+                    
+                    if let ci = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) {
+                        let h = VNImageRequestHandler(ciImage: ci, options: [:])
+                        do {
+                            try h.perform([req])
+                            if let obs = req.results?.first as? VNFeaturePrintObservation {
+                                continuation.resume(returning: (obs, url.path))
+                            } else {
+                                continuation.resume(returning: (nil, nil))
+                            }
+                        } catch {
+                            continuation.resume(returning: (nil, nil))
+                        }
+                    } else {
+                        continuation.resume(returning: (nil, nil))
+                    }
+                }
+            }
+            
+            if let obs = result.0, let path = result.1 {
+                observations.append(obs)
+                paths.append(path)
+            }
+            
+            // Update progress asynchronously every few images or on last image
+            if index % batchSize == 0 || index == urls.count - 1 {
+                let currentProgress = Double(processedSoFar + index + 1) / Double(max(totalImages, 1))
+                emit?(currentProgress)
+            }
+        }
+        
+        return (observations, paths)
+    }
+
     /// Build feature prints for URLs. Must be called on MainActor.
     /// Returns parallel arrays: observations[i] corresponds to paths[i].
+    /// DEPRECATED: Use _makeFeaturePrintsAsync instead to avoid UI blocking
     @MainActor
     private static func _makeFeaturePrints(
         for urls: [URL],
-        progress: (() -> Void)?    // ⬅︎ not @Sendable; runs only on MainActor
+        progress: (() -> Void)?    // ⬅️ not @Sendable; runs only on MainActor
     ) -> ([VNFeaturePrintObservation], [String]) {
         var observations: [VNFeaturePrintObservation] = []
         observations.reserveCapacity(urls.count)
@@ -544,19 +639,16 @@ public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
 
     // MARK: Downsampling
 
-    
-public nonisolated static func downsampledCGImage(from url: URL, to size: CGSize) -> CGImage? {
-    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-    let maxDimension = Int(max(size.width, size.height))
-    let opts: [CFString: Any] = [
-        kCGImageSourceCreateThumbnailFromImageAlways: true,
-        kCGImageSourceShouldCache: false,
-        kCGImageSourceShouldCacheImmediately: false,
-        kCGImageSourceCreateThumbnailWithTransform: true,
-        kCGImageSourceThumbnailMaxPixelSize: maxDimension
-    ]
-    return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+    public nonisolated static func downsampledCGImage(from url: URL, to size: CGSize) -> CGImage? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let maxDimension = Int(max(size.width, size.height))
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceShouldCacheImmediately: false,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+    }
 }
-
-}
-
