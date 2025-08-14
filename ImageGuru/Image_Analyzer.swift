@@ -361,8 +361,26 @@ public enum ImageAnalyzer {
     // MARK: Directory planning
 
     public nonisolated static func foldersToScan(from roots: [URL]) -> [URL] {
-        recursiveSubdirectoriesExcludingRoots(under: roots)
+        var out: [URL] = []
+        out.reserveCapacity(roots.count * 4)
+
+        for root in roots {
+            // Get subdirectories under *this* root
+            let subs = recursiveSubdirectoriesExcludingRoots(under: [root])
+            if subs.isEmpty {
+                // Leaf root (no subdirs) -> include the root itself
+                out.append(root)
+            } else {
+                // Non-leaf root -> include only the subdirs (old behavior)
+                out.append(contentsOf: subs)
+            }
+        }
+
+        // Deduplicate while preserving order
+        var seen = Set<URL>()
+        return out.filter { seen.insert($0.standardizedFileURL).inserted }
     }
+
 
     public nonisolated static func recursiveSubdirectoriesExcludingRoots(under roots: [URL]) -> [URL] {
         let fm = FileManager.default
