@@ -150,8 +150,18 @@ extension ContentView {
                                         Spacer(minLength: 12)
 
                                         HStack(spacing: 8) {
-                                            // Removed thumbnail loading for now - can add simple on-demand loading later
-                                            Text("\(vm.folderDuplicateCounts[folder, default: 0]) duplicates")  // Changed from vm.cachedFolderDuplicateCount
+                                            // Simple on-demand thumbnail
+                                            if let imagePath = vm.representativeImageByFolder[folder] {
+                                                PreviewImage(path: imagePath, maxDimension: 36)
+                                                    .frame(width: 36, height: 36)
+                                                    .clipped()
+                                                    .cornerRadius(4)
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 4)
+                                                            .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                                                    )
+                                            }
+                                            Text("\(vm.folderDuplicateCounts[folder, default: 0]) duplicates")
                                                 .foregroundStyle(.secondary)
                                                 .font(.footnote)
                                         }
