@@ -74,7 +74,8 @@ public enum ImageAnalyzer {
     }
 
     // MARK: Public API (pHash table pairs)
-    public static func analyzePerceptualHash(
+    // NOTE: nonisolated -> callable from detached/background tasks in Swift 6
+    public nonisolated static func analyzePerceptualHash(
         roots: [URL],
         scanTopLevelOnly: Bool,
         maxDist: Int = 5,
@@ -82,7 +83,6 @@ public enum ImageAnalyzer {
     ) -> [TableRow] {
 
         let emit = makeProgressEmitter(progress)
-
         let subdirs = foldersToScan(from: roots)
 
         if scanTopLevelOnly {
@@ -102,7 +102,8 @@ public enum ImageAnalyzer {
             return rows
         } else {
             var allFiles: [URL] = []
-            for d in subdirs { allFiles.append(contentsOf: topLevelImageFiles(in: d)) }
+            // Match deep-features behavior: recursive when cross-folder
+            for d in subdirs { allFiles.append(contentsOf: allImageFiles(in: d)) }
             let rows = hashAndPair(urls: allFiles, maxDist: maxDist) { done, total in
                 tick(done, total, emit)
             }.sorted { $0.percent > $1.percent }
@@ -121,7 +122,8 @@ public enum ImageAnalyzer {
         progress: (@Sendable (Double) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
-    ) {
+    )
+    {
         let emit = makeProgressEmitter(progress)
 
         Task.detached(priority: .userInitiated) {
@@ -196,7 +198,70 @@ public enum ImageAnalyzer {
         }
     }
 
-    // MARK: Deep Features – MainActor section
+    // MARK: Public API (Perceptual Hash, same shape as Deep Features)
+    public nonisolated static func analyzeWithPerceptualHash(
+        inFolders roots: [URL],
+        similarityThreshold: Double,
+        topLevelOnly: Bool,
+        progress: (@Sendable (Double) -> Void)? = nil,
+        shouldCancel: (@Sendable () -> Bool)? = nil,
+        completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
+    ) {
+        // Map normalized similarity (0...1) to 64‑bit Hamming distance:
+        // similarity = 1 - d/64  =>  d = (1 - similarity) * 64
+        let maxDist = max(0, min(64, Int((1.0 - similarityThreshold) * 64.0)))
+
+        let emit = makeProgressEmitter(progress)
+
+        Task.detached(priority: .userInitiated) {
+            if shouldCancel?() == true {
+                await MainActor.run { completion([]) }
+                return
+            }
+
+            // Use the nonisolated pHash engine
+            let pairs = analyzePerceptualHash(
+                roots: roots,
+                scanTopLevelOnly: topLevelOnly,
+                maxDist: maxDist,
+                progress: { p in emit?(p) }
+            )
+
+            if shouldCancel?() == true {
+                await MainActor.run { completion([]) }
+                return
+            }
+
+            // Group TableRow pairs into ImageComparisonResult on MainActor (fixes isolation errors)
+            let results: [ImageComparisonResult] = await MainActor.run {
+                var grouped: [String: [(path: String, percent: Double)]] = [:]
+                grouped.reserveCapacity(pairs.count)
+                for r in pairs {
+                    grouped[r.reference, default: []].append((path: r.similar, percent: r.percent))
+                }
+
+                var out: [ImageComparisonResult] = []
+                out.reserveCapacity(grouped.count)
+                for (ref, sims) in grouped {
+                    out.append(
+                        ImageComparisonResult(
+                            reference: ref,
+                            similars: sims.sorted { $0.percent > $1.percent }
+                        )
+                    )
+                }
+
+                // Sort clusters by their best match descending (nice UX)
+                out.sort { ($0.similars.first?.percent ?? 0) > ($1.similars.first?.percent ?? 0) }
+                return out
+            }
+
+            await MainActor.run {
+                emit?(1.0)
+                completion(results)
+            }
+        }
+    }
 
     /// Build feature prints for URLs. Must be called on MainActor.
     /// Returns parallel arrays: observations[i] corresponds to paths[i].
@@ -321,7 +386,7 @@ public enum ImageAnalyzer {
 
     private typealias PairProgress = (Int, Int) -> Void
 
-    private static func hashAndPair(
+    private nonisolated static func hashAndPair(
         urls: [URL],
         maxDist: Int,
         progress: PairProgress
@@ -353,7 +418,7 @@ public enum ImageAnalyzer {
     }
 
     @inline(__always)
-    private static func tick(_ done: Int, _ total: Int, _ emit: (@Sendable (Double) -> Void)?) {
+    private nonisolated static func tick(_ done: Int, _ total: Int, _ emit: (@Sendable (Double) -> Void)?) {
         guard let emit, total > 0 else { return }
         emit(Double(done) / Double(total))
     }
@@ -380,7 +445,6 @@ public enum ImageAnalyzer {
         var seen = Set<URL>()
         return out.filter { seen.insert($0.standardizedFileURL).inserted }
     }
-
 
     public nonisolated static func recursiveSubdirectoriesExcludingRoots(under roots: [URL]) -> [URL] {
         let fm = FileManager.default

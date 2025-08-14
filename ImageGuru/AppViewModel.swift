@@ -160,10 +160,6 @@ final class AppViewModel: ObservableObject {
             return v
         }
 
-
-        //self.cancelBoxRef = cancelBox
-
-
         let finish: @Sendable ([ImageComparisonResult]) -> Void = { [weak self] results in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -236,29 +232,6 @@ final class AppViewModel: ObservableObject {
         }
         recomputeDerived()
         preloadAllFolderThumbnails()
-    }
-}
-
-//// ---- Compatibility shim (remove once callers are updated) ----
-// ---- Compatibility shim: keep call-sites compiling; swap to real pHash when ready.
-extension ImageAnalyzer {
-    static func analyzeWithPerceptualHash(
-        inFolders: [URL],
-        similarityThreshold: Double,
-        topLevelOnly: Bool,
-        progress: @Sendable @escaping (Double) -> Void,
-        shouldCancel: @Sendable @escaping () -> Bool,
-        completion: @Sendable @escaping ([ImageComparisonResult]) -> Void
-    ) {
-        // TEMP: forward to deep-features so signatures match.
-        analyzeWithDeepFeatures(
-            inFolders: inFolders,
-            similarityThreshold: similarityThreshold,
-            topLevelOnly: topLevelOnly,
-            progress: progress,
-            shouldCancel: shouldCancel,
-            completion: completion
-        )
     }
 }
 
