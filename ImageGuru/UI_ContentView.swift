@@ -38,7 +38,7 @@ struct ContentView: View {
     @State var toggleVersion = 0
 
     var sortedRows: [TableRow] {
-        var rows = vm.cachedFlattened
+        let rows = vm.cachedFlattened
         //rows.sort(using: sortOrder)
         return rows
     }

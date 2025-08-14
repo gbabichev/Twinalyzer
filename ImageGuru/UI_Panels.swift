@@ -274,7 +274,7 @@ extension ContentView {
                             Text(shortDisplayPath(for: row.reference))
                                 //.foregroundStyle(isCrossFolder(row) ? .red : .primary)
                             PreviewImage(path: row.reference, maxDimension: maxDim)
-                                .frame(width: maxDim, height: maxDim)
+                                //.frame(width: maxDim, height: maxDim)
                                 .clipped()
                             Button("Delete Reference") { vm.deleteFile(row.reference) }
                         }
@@ -283,7 +283,7 @@ extension ContentView {
                             Text(shortDisplayPath(for: row.similar))
                                 .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                             PreviewImage(path: row.similar, maxDimension: maxDim)
-                                .frame(width: maxDim, height: maxDim)
+                                //.frame(width: maxDim, height: maxDim)
                                 .clipped()
                             Button("Delete Match") { vm.deleteFile(row.similar) }
                         }

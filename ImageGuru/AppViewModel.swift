@@ -264,7 +264,7 @@ extension ImageAnalyzer {
 
 
 // Background-safe thumbnailing using CGImageSource; NOT @MainActor.
-nonisolated(unsafe)
+nonisolated
 func downsampledCGImage(at url: URL, targetMaxDimension: CGFloat) -> CGImage? {
     guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
     let options: [CFString: Any] = [
@@ -282,7 +282,7 @@ final class ProgressBox: @unchecked Sendable {
     private let f: (Double) -> Void
     init(_ f: @escaping (Double) -> Void) { self.f = f }
 
-    nonisolated(unsafe)
+    nonisolated
     func call(_ p: Double) {
         // Ensure the UI callback runs on the main thread.
         DispatchQueue.main.async { self.f(p) }

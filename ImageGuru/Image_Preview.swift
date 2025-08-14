@@ -64,7 +64,7 @@ struct PreviewImage: View {
 
         // Serve from cache immediately, on main.
         if let cached = ImageCache.shared.object(forKey: key) {
-            await setImage(cached)
+            setImage(cached)
             return
         }
 
