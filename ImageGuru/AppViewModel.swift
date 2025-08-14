@@ -22,7 +22,10 @@ final class AppViewModel: ObservableObject {
     @Published var cachedRepresentativeByFolder: [String: String] = [:]
     @Published var cachedClusters: [[String]] = []
     @Published var folderThumbs: [String: NSImage] = [:]
-    private var cancelBoxRef: CancelBox?
+    
+    // Simple cancellation - just use a Task that we can cancel
+    private var analysisTask: Task<Void, Never>?
+    
     /// All folders that will be processed (selected roots + all subdirectories, unique, sorted)
     var allFoldersBeingProcessed: [URL] {
         let roots = selectedFolderURLs.map { $0.standardizedFileURL }
@@ -116,16 +119,20 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-
     // MARK: - Open folder
     func openFolderInFinder(_ folder: String) {
         let url = URL(fileURLWithPath: folder, isDirectory: true)
         NSWorkspace.shared.open(url)
     }
 
-    // MARK: - Analysis entrypoint
-    func processImages(progress: @escaping (Double) -> Void) {
+    // MARK: - Analysis entrypoint (SIMPLIFIED)
+    func processImages(progress: @escaping @Sendable (Double) -> Void) {
         guard !isProcessing else { return }
+        
+        // Cancel any existing task
+        analysisTask?.cancel()
+        
+        // Reset state
         analysisCancelled = false
         isProcessing = true
         processingProgress = nil
@@ -134,40 +141,63 @@ final class AppViewModel: ObservableObject {
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
 
-        // Wrap non-Sendable progress so analyzer can take a @Sendable closure.
-        let progressBox = ProgressBox(progress)
-        let progressSink: @Sendable (Double) -> Void = { [weak self, progressBox] p in
-            // self.touch must be on main
-            DispatchQueue.main.async {
+        // Simple progress wrapper that updates our @Published property
+        let progressWrapper: @Sendable (Double) -> Void = { [weak self] p in
+            Task { @MainActor in
                 self?.processingProgress = p
             }
-            // external callback (also on main)
-            progressBox.call(p)
-        }
-
-        // Use a Sendable cancel flag instead of reading main-actor state off-main.
-        // Use a MainActor box and read it synchronously from any thread.
-        let cancelBox = CancelBox()
-        cancelBox.set(false)
-        self.cancelBoxRef = cancelBox
-
-        let shouldCancel: @Sendable () -> Bool = { [weak cancelBox] in
-            var v = false
-            // sync hop to main to read the @MainActor value
-            DispatchQueue.main.sync {
-                v = cancelBox?.value ?? false
-            }
-            return v
-        }
-
-        let finish: @Sendable ([ImageComparisonResult]) -> Void = { [weak self] results in
+            // Call the external progress callback on main thread
             DispatchQueue.main.async {
-                guard let self = self else { return }
-                if cancelBox.value {
+                progress(p)
+            }
+        }
+
+        // Create the analysis task
+        analysisTask = Task {
+            let results: [ImageComparisonResult]
+            
+            switch selectedAnalysisMode {
+            case .deepFeature:
+                results = await withTaskCancellationHandler {
+                    await withCheckedContinuation { continuation in
+                        ImageAnalyzer.analyzeWithDeepFeatures(
+                            inFolders: roots,
+                            similarityThreshold: threshold,
+                            topLevelOnly: topOnly,
+                            progress: progressWrapper,
+                            shouldCancel: { Task.isCancelled },
+                            completion: { results in continuation.resume(returning: results) }
+                        )
+                    }
+                } onCancel: {
+                    // Task was cancelled
+                }
+                
+            case .perceptualHash:
+                results = await withTaskCancellationHandler {
+                    await withCheckedContinuation { continuation in
+                        ImageAnalyzer.analyzeWithPerceptualHash(
+                            inFolders: roots,
+                            similarityThreshold: threshold,
+                            topLevelOnly: topOnly,
+                            progress: progressWrapper,
+                            shouldCancel: { Task.isCancelled },
+                            completion: { results in continuation.resume(returning: results) }
+                        )
+                    }
+                } onCancel: {
+                    // Task was cancelled
+                }
+            }
+            
+            // Update UI on main actor
+            await MainActor.run {
+                if Task.isCancelled {
                     self.processingProgress = nil
                     self.isProcessing = false
                     return
                 }
+                
                 self.comparisonResults = results
                 self.processingProgress = nil
                 self.isProcessing = false
@@ -175,37 +205,13 @@ final class AppViewModel: ObservableObject {
                 self.preloadAllFolderThumbnails()
             }
         }
-
-        switch selectedAnalysisMode {
-        case .deepFeature:
-            ImageAnalyzer.analyzeWithDeepFeatures(
-                inFolders: roots,
-                similarityThreshold: threshold,
-                topLevelOnly: topOnly,
-                progress: progressSink,
-                shouldCancel: shouldCancel,
-                completion: finish
-            )
-        case .perceptualHash:
-            ImageAnalyzer.analyzeWithPerceptualHash(
-                inFolders: roots,
-                similarityThreshold: threshold,
-                topLevelOnly: topOnly,
-                progress: progressSink,
-                shouldCancel: shouldCancel,
-                completion: finish
-            )
-        }
-
-        // Keep the box in sync if you also toggle via UI
-        // (your existing cancelAnalysis() below flips it)
-        // Store it in a property if you need to reference it later.
     }
 
-    // MARK: - Cancel analysis
+    // MARK: - Cancel analysis (SIMPLIFIED)
     func cancelAnalysis() {
         analysisCancelled = true
-        cancelBoxRef?.set(true)
+        analysisTask?.cancel()
+        analysisTask = nil
         isProcessing = false
         processingProgress = nil
     }
@@ -235,7 +241,6 @@ final class AppViewModel: ObservableObject {
     }
 }
 
-
 // Background-safe thumbnailing using CGImageSource; NOT @MainActor.
 nonisolated
 func downsampledCGImage(at url: URL, targetMaxDimension: CGFloat) -> CGImage? {
@@ -249,23 +254,4 @@ func downsampledCGImage(at url: URL, targetMaxDimension: CGFloat) -> CGImage? {
     return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
 }
 
-
-// Sendable wrappers used to cross thread boundaries safely.
-final class ProgressBox: @unchecked Sendable {
-    private let f: (Double) -> Void
-    init(_ f: @escaping (Double) -> Void) { self.f = f }
-
-    nonisolated
-    func call(_ p: Double) {
-        // Ensure the UI callback runs on the main thread.
-        DispatchQueue.main.async { self.f(p) }
-    }
-}
-
-public final class CancelBox {
-    private var _value: Bool = false
-    public init() {}
-
-    public var value: Bool { _value }
-    public func set(_ newValue: Bool) { _value = newValue }
-}
+// Sendable wrappers removed - no longer needed with simplified approach

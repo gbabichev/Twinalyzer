@@ -1,6 +1,6 @@
 //
 //  Image_Analyzer.swift
-//  Swift 6–ready, deep embed merged (race-free) - FIXED VERSION
+//  Swift 6 ready, simplified progress tracking
 //
 
 import Foundation
@@ -32,91 +32,28 @@ public struct ImageComparisonResult: Identifiable, Sendable, Equatable, Hashable
     public func hash(into h: inout Hasher) { h.combine(id) }
 }
 
-// MARK: - Throttle state (actor avoids captured-var races)
-
-fileprivate actor ThrottleBox {
-    private var lastSent: CFAbsoluteTime = 0
-    private let minInterval: CFTimeInterval
-    init(minInterval: CFTimeInterval) { self.minInterval = minInterval }
-
-    func shouldEmit(_ value: Double) -> Bool {
-        let now = CFAbsoluteTimeGetCurrent()
-        if now - lastSent >= minInterval || value >= 0.9999 {
-            lastSent = now
-            return true
-        }
-        return false
-    }
-}
-
 // MARK: - Analyzer
 
 public enum ImageAnalyzer {
 
-    // MARK: Progress helper (closure-based, @Sendable, race-free)
-    /// Returns a throttled progress **emitter** you can call from any thread.
-    /// It rate-limits emits (via an actor) and hops to the main actor before invoking the UI sink.
-    public nonisolated static func makeProgressEmitter(
-        _ progress: (@Sendable (Double) -> Void)?,
-        minInterval: CFTimeInterval = 0.05
-    ) -> (@Sendable (Double) -> Void)? {
-        guard let progress else { return nil }
-        let box = ThrottleBox(minInterval: minInterval)
-        return { value in
-            Task {
-                if await box.shouldEmit(value) {
-                    await MainActor.run {
-                        progress(max(0, min(1, value)))
-                    }
-                }
+    // MARK: - Simple Progress Helper
+    private nonisolated static func updateProgress(
+        _ current: Int, 
+        _ total: Int, 
+        _ callback: (@Sendable (Double) -> Void)?
+    ) {
+        guard let callback, total > 0 else { return }
+        let progress = Double(current) / Double(total)
+        
+        // Simple throttling - only update every 10 items or at 100%
+        if current % 10 == 0 || current == total {
+            Task { @MainActor in
+                callback(progress)
             }
         }
     }
 
-    // MARK: Public API (pHash table pairs)
-    // NOTE: nonisolated -> callable from detached/background tasks in Swift 6
-    public nonisolated static func analyzePerceptualHash(
-        roots: [URL],
-        scanTopLevelOnly: Bool,
-        maxDist: Int = 5,
-        progress: (@Sendable (Double) -> Void)? = nil
-    ) -> [TableRow] {
-
-        let emit = makeProgressEmitter(progress)
-        let subdirs = foldersToScan(from: roots)
-
-        if scanTopLevelOnly {
-            let totalImages = subdirs.reduce(0) { $0 + topLevelImageFiles(in: $1).count }
-            var processed = 0
-            var rows: [TableRow] = []
-            for dir in subdirs {
-                let files = topLevelImageFiles(in: dir)
-                var localDone = 0
-                let pairs = hashAndPair(urls: files, maxDist: maxDist) { done, total in
-                    localDone = done
-                    tick(processed + localDone, max(totalImages, total), emit)
-                }
-                processed += localDone
-                rows.append(contentsOf: pairs)
-            }
-            rows.sort { $0.percent > $1.percent }
-            tick(totalImages, totalImages, emit)
-            return rows
-        } else {
-            var allFiles: [URL] = []
-            // Match deep-features behavior: recursive when cross-folder
-            for d in subdirs { allFiles.append(contentsOf: allImageFiles(in: d)) }
-            let rows = hashAndPair(urls: allFiles, maxDist: maxDist) { done, total in
-                tick(done, total, emit)
-            }.sorted { $0.percent > $1.percent }
-            tick(allFiles.count, allFiles.count, emit)
-            return rows
-        }
-    }
-
-    // MARK: Public API (Deep Features, merged, Swift 6-safe) - FIXED VERSION
-    /// Runs Vision work on background threads and only uses MainActor for progress updates.
-    /// This prevents UI blocking and allows smooth progress bar updates.
+    // MARK: Public API (Deep Features, simplified)
     public nonisolated static func analyzeWithDeepFeatures(
         inFolders roots: [URL],
         similarityThreshold: Double,
@@ -124,112 +61,107 @@ public enum ImageAnalyzer {
         progress: (@Sendable (Double) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
-    )
-    {
-        let emit = makeProgressEmitter(progress)
-
+    ) {
         Task.detached(priority: .userInitiated) {
-            @inline(__always) func bump(_ done: Int, _ total: Int) {
-                guard let emit, total > 0 else { return }
-                emit(Double(done) / Double(total))
-            }
-
-            // plan scan roots on a background thread
             let subdirs = foldersToScan(from: roots)
-
             var results: [ImageComparisonResult] = []
-
+            
             if topLevelOnly {
-                let totalImages = subdirs.reduce(0) { $0 + topLevelImageFiles(in: $1).count }
-                var processed = 0
-
+                var totalProcessed = 0
+                let allFiles = subdirs.flatMap { topLevelImageFiles(in: $0) }
+                let totalCount = allFiles.count
+                
                 for dir in subdirs {
-                    if shouldCancel?() == true {
-                        await MainActor.run { completion([]) }
-                        return
-                    }
-
+                    if shouldCancel?() == true { break }
+                    
                     let files = topLevelImageFiles(in: dir)
-                    guard !files.isEmpty else { continue }
-
-                    // ➜ Vision extraction on BACKGROUND thread with async progress updates
-                    let (observations, paths) = await _makeFeaturePrintsAsync(
-                        for: files,
-                        processedSoFar: processed,
-                        totalImages: totalImages,
-                        emit: emit,
+                    let folderResults = await processImageBatch(
+                        files: files, 
+                        threshold: similarityThreshold,
+                        processedSoFar: totalProcessed,
+                        totalCount: totalCount,
+                        progress: progress,
                         shouldCancel: shouldCancel
                     )
                     
-                    if shouldCancel?() == true {
-                        await MainActor.run { completion([]) }
-                        return
-                    }
-                    
-                    processed += files.count
-
-                    // ➜ Clustering can stay on MainActor since it's fast
-                    let folderResults = await MainActor.run {
-                        Self._clusterFeaturePrints(observations: observations, paths: paths, threshold: similarityThreshold)
-                    }
-                    
-                    if !folderResults.isEmpty {
-                        results.append(contentsOf: folderResults)
-                    }
+                    totalProcessed += files.count
+                    results.append(contentsOf: folderResults)
                 }
             } else {
-                // gather all images
-                var imageFiles: [URL] = []
-                for d in subdirs {
-                    if shouldCancel?() == true {
-                        await MainActor.run { completion([]) }
-                        return
-                    }
-                    imageFiles.append(contentsOf: allImageFiles(in: d))
-                }
-
-                let total = imageFiles.count
-                if total == 0 {
-                    await MainActor.run {
-                        emit?(1.0)
-                        completion([])
-                    }
-                    return
-                }
-
-                // ➜ Vision extraction on BACKGROUND thread with async progress updates
-                let (observations, paths) = await _makeFeaturePrintsAsync(
-                    for: imageFiles,
+                let allFiles = subdirs.flatMap { allImageFiles(in: $0) }
+                results = await processImageBatch(
+                    files: allFiles,
+                    threshold: similarityThreshold, 
                     processedSoFar: 0,
-                    totalImages: total,
-                    emit: emit,
+                    totalCount: allFiles.count,
+                    progress: progress,
                     shouldCancel: shouldCancel
                 )
+            }
+            
+            await MainActor.run {
+                progress?(1.0)
+                completion(shouldCancel?() == true ? [] : results)
+            }
+        }
+    }
+    
+    /// Process a batch of images and extract features
+    private nonisolated static func processImageBatch(
+        files: [URL],
+        threshold: Double,
+        processedSoFar: Int,
+        totalCount: Int,
+        progress: (@Sendable (Double) -> Void)?,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [ImageComparisonResult] {
+        
+        var observations: [VNFeaturePrintObservation] = []
+        var paths: [String] = []
+        
+        // Extract features with simple progress tracking
+        for (index, url) in files.enumerated() {
+            if shouldCancel?() == true { break }
+            
+            if let observation = await extractFeature(from: url) {
+                observations.append(observation)
+                paths.append(url.path)
+            }
+            
+            updateProgress(processedSoFar + index + 1, totalCount, progress)
+        }
+        
+        // Cluster on main actor (it's fast)
+        return await MainActor.run {
+            _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
+        }
+    }
+    
+    /// Extract feature from single image
+    private nonisolated static func extractFeature(from url: URL) async -> VNFeaturePrintObservation? {
+        return await withCheckedContinuation { continuation in
+            autoreleasepool {
+                let request = VNGenerateImageFeaturePrintRequest()
                 
-                if shouldCancel?() == true {
-                    await MainActor.run { completion([]) }
+                guard let ciImage = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
+                    continuation.resume(returning: nil)
                     return
                 }
-
-                // ➜ Clustering on MainActor
-                results = await MainActor.run {
-                    Self._clusterFeaturePrints(observations: observations, paths: paths, threshold: similarityThreshold)
+                
+                let handler = VNImageRequestHandler(ciImage: ciImage, options: [:])
+                
+                do {
+                    try handler.perform([request])
+                    let observation = request.results?.first as? VNFeaturePrintObservation
+                    continuation.resume(returning: observation)
+                } catch {
+                    continuation.resume(returning: nil)
                 }
-            }
-
-            if shouldCancel?() == true {
-                await MainActor.run { completion([]) }
-                return
-            }
-
-            await MainActor.run {
-                emit?(1.0)
-                completion(results)
             }
         }
     }
 
-    // MARK: Public API (Perceptual Hash, same shape as Deep Features)
+    // MARK: Public API (Perceptual Hash, simplified)
     public nonisolated static func analyzeWithPerceptualHash(
         inFolders roots: [URL],
         similarityThreshold: Double,
@@ -238,158 +170,144 @@ public enum ImageAnalyzer {
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
     ) {
-        // Map normalized similarity (0...1) to 64‑bit Hamming distance:
-        // similarity = 1 - d/64  =>  d = (1 - similarity) * 64
         let maxDist = max(0, min(64, Int((1.0 - similarityThreshold) * 64.0)))
-
-        let emit = makeProgressEmitter(progress)
-
+        
         Task.detached(priority: .userInitiated) {
-            if shouldCancel?() == true {
-                await MainActor.run { completion([]) }
-                return
-            }
-
-            // Use the nonisolated pHash engine
-            let pairs = analyzePerceptualHash(
+            let pairs = computeHashPairs(
                 roots: roots,
-                scanTopLevelOnly: topLevelOnly,
+                topLevelOnly: topLevelOnly,
                 maxDist: maxDist,
-                progress: { p in emit?(p) }
+                progress: progress,
+                shouldCancel: shouldCancel
             )
-
+            
             if shouldCancel?() == true {
                 await MainActor.run { completion([]) }
                 return
             }
-
-            // Group TableRow pairs into ImageComparisonResult on MainActor (fixes isolation errors)
-            let results: [ImageComparisonResult] = await MainActor.run {
-                var grouped: [String: [(path: String, percent: Double)]] = [:]
-                grouped.reserveCapacity(pairs.count)
-                for r in pairs {
-                    grouped[r.reference, default: []].append((path: r.similar, percent: r.percent))
-                }
-
-                var out: [ImageComparisonResult] = []
-                out.reserveCapacity(grouped.count)
-                for (ref, sims) in grouped {
-                    out.append(
-                        ImageComparisonResult(
-                            reference: ref,
-                            similars: sims.sorted { $0.percent > $1.percent }
-                        )
-                    )
-                }
-
-                // Sort clusters by their best match descending (nice UX)
-                out.sort { ($0.similars.first?.percent ?? 0) > ($1.similars.first?.percent ?? 0) }
-                return out
+            
+            // Group pairs into results on main actor
+            let results = await MainActor.run {
+                groupPairsIntoResults(pairs)
             }
-
+            
             await MainActor.run {
-                emit?(1.0)
+                progress?(1.0)
                 completion(results)
             }
         }
     }
-
-    /// FIXED: Build feature prints for URLs on BACKGROUND thread with async progress updates.
-    /// This prevents UI blocking and allows smooth progress updates.
-    /// Returns parallel arrays: observations[i] corresponds to paths[i].
-    private nonisolated static func _makeFeaturePrintsAsync(
-        for urls: [URL],
-        processedSoFar: Int,
-        totalImages: Int,
-        emit: (@Sendable (Double) -> Void)?,
+    
+    private nonisolated static func computeHashPairs(
+        roots: [URL],
+        topLevelOnly: Bool,
+        maxDist: Int,
+        progress: (@Sendable (Double) -> Void)?,
         shouldCancel: (@Sendable () -> Bool)?
-    ) async -> ([VNFeaturePrintObservation], [String]) {
+    ) -> [TableRow] {
         
-        var observations: [VNFeaturePrintObservation] = []
-        observations.reserveCapacity(urls.count)
-        var paths: [String] = []
-        paths.reserveCapacity(urls.count)
-
-        let batchSize = 10 // Process images in batches to yield control
+        let subdirs = foldersToScan(from: roots)
+        var allPairs: [TableRow] = []
         
-        for (index, url) in urls.enumerated() {
-            if shouldCancel?() == true {
-                break
+        if topLevelOnly {
+            var totalProcessed = 0
+            let allFiles = subdirs.flatMap { topLevelImageFiles(in: $0) }
+            let totalCount = allFiles.count
+            
+            for dir in subdirs {
+                if shouldCancel?() == true { break }
+                
+                let files = topLevelImageFiles(in: dir)
+                let pairs = hashAndCompare(files: files, maxDist: maxDist)
+                allPairs.append(contentsOf: pairs)
+                
+                totalProcessed += files.count
+                updateProgress(totalProcessed, totalCount, progress)
             }
-            
-            // Process image on background thread
-            await Task.yield() // Yield control periodically
-            
-            let result: (VNFeaturePrintObservation?, String?) = await withCheckedContinuation { continuation in
-                autoreleasepool {
-                    let req = VNGenerateImageFeaturePrintRequest()
-                    
-                    if let ci = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) {
-                        let h = VNImageRequestHandler(ciImage: ci, options: [:])
-                        do {
-                            try h.perform([req])
-                            if let obs = req.results?.first as? VNFeaturePrintObservation {
-                                continuation.resume(returning: (obs, url.path))
-                            } else {
-                                continuation.resume(returning: (nil, nil))
-                            }
-                        } catch {
-                            continuation.resume(returning: (nil, nil))
-                        }
-                    } else {
-                        continuation.resume(returning: (nil, nil))
-                    }
-                }
-            }
-            
-            if let obs = result.0, let path = result.1 {
-                observations.append(obs)
-                paths.append(path)
-            }
-            
-            // Update progress asynchronously every few images or on last image
-            if index % batchSize == 0 || index == urls.count - 1 {
-                let currentProgress = Double(processedSoFar + index + 1) / Double(max(totalImages, 1))
-                emit?(currentProgress)
+        } else {
+            let allFiles = subdirs.flatMap { allImageFiles(in: $0) }
+            allPairs = hashAndCompare(files: allFiles, maxDist: maxDist)
+            updateProgress(allFiles.count, allFiles.count, progress)
+        }
+        
+        return allPairs.sorted { $0.percent > $1.percent }
+    }
+    
+    private nonisolated static func hashAndCompare(files: [URL], maxDist: Int) -> [TableRow] {
+        var hashes: [(path: String, hash: UInt64)] = []
+        
+        for file in files {
+            if let hash = blockHash(for: file) {
+                hashes.append((path: file.path, hash: hash))
             }
         }
         
-        return (observations, paths)
+        var pairs: [TableRow] = []
+        for i in 0..<hashes.count {
+            for j in (i + 1)..<hashes.count {
+                let distance = hammingDistance(hashes[i].hash, hashes[j].hash)
+                if distance <= maxDist {
+                    let similarity = 1.0 - (Double(distance) / 64.0)
+                    pairs.append(TableRow(
+                        reference: hashes[i].path,
+                        similar: hashes[j].path,
+                        percent: similarity
+                    ))
+                }
+            }
+        }
+        return pairs
+    }
+    
+    @MainActor
+    private static func groupPairsIntoResults(_ pairs: [TableRow]) -> [ImageComparisonResult] {
+        var grouped: [String: [(path: String, percent: Double)]] = [:]
+        
+        for pair in pairs {
+            grouped[pair.reference, default: []].append((path: pair.similar, percent: pair.percent))
+        }
+        
+        return grouped.map { reference, similars in
+            ImageComparisonResult(
+                reference: reference,
+                similars: similars.sorted { $0.percent > $1.percent }
+            )
+        }.sorted { ($0.similars.first?.percent ?? 0) > ($1.similars.first?.percent ?? 0) }
     }
 
-    /// Build feature prints for URLs. Must be called on MainActor.
-    /// Returns parallel arrays: observations[i] corresponds to paths[i].
-    /// DEPRECATED: Use _makeFeaturePrintsAsync instead to avoid UI blocking
-    @MainActor
-    private static func _makeFeaturePrints(
-        for urls: [URL],
-        progress: (() -> Void)?    // ⬅️ not @Sendable; runs only on MainActor
-    ) -> ([VNFeaturePrintObservation], [String]) {
-        var observations: [VNFeaturePrintObservation] = []
-        observations.reserveCapacity(urls.count)
-        var paths: [String] = []
-        paths.reserveCapacity(urls.count)
-
-        let req = VNGenerateImageFeaturePrintRequest()
-
-        for url in urls {
-            autoreleasepool {
-                if let ci = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) {
-                    let h = VNImageRequestHandler(ciImage: ci, options: [:])
-                    do {
-                        try h.perform([req])
-                        if let obs = req.results?.first as? VNFeaturePrintObservation {
-                            observations.append(obs)
-                            paths.append(url.path)
-                        }
-                    } catch {
-                        // skip on error
-                    }
-                }
-                progress?()  // runs synchronously on MainActor
+    // MARK: Public API (pHash table pairs) - kept for compatibility
+    public nonisolated static func analyzePerceptualHash(
+        roots: [URL],
+        scanTopLevelOnly: Bool,
+        maxDist: Int = 5,
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) -> [TableRow] {
+        
+        let subdirs = foldersToScan(from: roots)
+        
+        if scanTopLevelOnly {
+            let totalImages = subdirs.reduce(0) { $0 + topLevelImageFiles(in: $1).count }
+            var processed = 0
+            var rows: [TableRow] = []
+            for dir in subdirs {
+                let files = topLevelImageFiles(in: dir)
+                var localDone = 0
+                let pairs = hashAndCompare(files: files, maxDist: maxDist)
+                localDone = files.count
+                processed += localDone
+                updateProgress(processed, totalImages, progress)
+                rows.append(contentsOf: pairs)
             }
+            rows.sort { $0.percent > $1.percent }
+            updateProgress(totalImages, totalImages, progress)
+            return rows
+        } else {
+            var allFiles: [URL] = []
+            for d in subdirs { allFiles.append(contentsOf: allImageFiles(in: d)) }
+            let rows = hashAndCompare(files: allFiles, maxDist: maxDist).sorted { $0.percent > $1.percent }
+            updateProgress(allFiles.count, allFiles.count, progress)
+            return rows
         }
-        return (observations, paths)
     }
 
     /// Cluster Vision observations at a given threshold. Must be called on MainActor.
@@ -477,47 +395,6 @@ public enum ImageAnalyzer {
         return results
     }
 
-    // MARK: pHash plumbing (background-safe)
-
-    private typealias PairProgress = (Int, Int) -> Void
-
-    private nonisolated static func hashAndPair(
-        urls: [URL],
-        maxDist: Int,
-        progress: PairProgress
-    ) -> [TableRow] {
-        let total = max(urls.count, 1)
-        var hashes = [(url: String, hash: UInt64)]()
-        hashes.reserveCapacity(urls.count)
-
-        var done = 0
-        for url in urls {
-            if let hash = blockHash(for: url) {
-                hashes.append((url: url.path, hash: hash))
-            }
-            done += 1
-            progress(done, total)
-        }
-
-        var rows: [TableRow] = []
-        for i in 0..<hashes.count {
-            for j in (i + 1)..<hashes.count {
-                let d = hammingDistance(hashes[i].hash, hashes[j].hash)
-                if d <= maxDist {
-                    let percent = 1.0 - (Double(d) / 64.0)
-                    rows.append(TableRow(reference: hashes[i].url, similar: hashes[j].url, percent: percent))
-                }
-            }
-        }
-        return rows
-    }
-
-    @inline(__always)
-    private nonisolated static func tick(_ done: Int, _ total: Int, _ emit: (@Sendable (Double) -> Void)?) {
-        guard let emit, total > 0 else { return }
-        emit(Double(done) / Double(total))
-    }
-
     // MARK: Directory planning
 
     public nonisolated static func foldersToScan(from roots: [URL]) -> [URL] {
@@ -566,38 +443,34 @@ public enum ImageAnalyzer {
 
     // MARK: File enumeration
 
-    
-public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
-    var results: [URL] = []
-    let fm = FileManager.default
-    if let e = fm.enumerator(at: directory,
-                             includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
-                             options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
-        for case let url as URL in e {
-            guard let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
-                  (rv.isRegularFile ?? false),
-                  !(rv.isHidden ?? false),
-                  allowedImageExtensions.contains(url.pathExtension.lowercased())
-            else { continue }
-            results.append(url)
+    public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
+        var results: [URL] = []
+        let fm = FileManager.default
+        if let e = fm.enumerator(at: directory,
+                                 includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
+                                 options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
+            for case let url as URL in e {
+                guard let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
+                      (rv.isRegularFile ?? false),
+                      !(rv.isHidden ?? false),
+                      allowedImageExtensions.contains(url.pathExtension.lowercased())
+                else { continue }
+                results.append(url)
+            }
+        }
+        return results
+    }
+
+    public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: directory,
+                                                         includingPropertiesForKeys: [.isRegularFileKey],
+                                                         options: [.skipsHiddenFiles]) else { return [] }
+        return contents.filter {
+            (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true &&
+            allowedImageExtensions.contains($0.pathExtension.lowercased())
         }
     }
-    return results
-}
-
-
-    
-public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
-    let fm = FileManager.default
-    guard let contents = try? fm.contentsOfDirectory(at: directory,
-                                                     includingPropertiesForKeys: [.isRegularFileKey],
-                                                     options: [.skipsHiddenFiles]) else { return [] }
-    return contents.filter {
-        (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true &&
-        allowedImageExtensions.contains($0.pathExtension.lowercased())
-    }
-}
-
 
     private nonisolated static let allowedImageExtensions: Set<String> = [
         "jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"

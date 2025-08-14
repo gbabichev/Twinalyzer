@@ -71,7 +71,7 @@ extension ContentView {
                         //.buttonStyle(.borderedProminent)
 
                     Button("Analyze") {
-                        vm.processImages(progress: { p in vm.processingProgress = p })
+                        vm.processImages(progress: { _ in })
                     }
                     .disabled(vm.selectedFolderURLs.isEmpty)
                     .frame(maxWidth: .infinity, minHeight: 44)
