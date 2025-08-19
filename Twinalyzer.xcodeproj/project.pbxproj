@@ -85,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 5E58164C2E43DC1D00D6D4A0 /* Build configuration list for PBXProject "ImageGuru" */;
+			buildConfigurationList = 5E58164C2E43DC1D00D6D4A0 /* Build configuration list for PBXProject "Twinalyzer" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -330,7 +330,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		5E58164C2E43DC1D00D6D4A0 /* Build configuration list for PBXProject "ImageGuru" */ = {
+		5E58164C2E43DC1D00D6D4A0 /* Build configuration list for PBXProject "Twinalyzer" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				5E58165A2E43DC1E00D6D4A0 /* Debug */,

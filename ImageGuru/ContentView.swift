@@ -33,10 +33,23 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if vm.isProcessing { processingView }
-            else { mainSplitView }
+            if vm.isProcessing {
+                processingView
+            } else {
+                // CHANGED: Use NavigationSplitView for native sidebar
+                NavigationSplitView {
+                    sidebarContent
+                } content: {
+                    tableView
+                        .navigationSplitViewColumnWidth(min: 500, ideal: 600)
+                } detail: {
+                    detailSplitView
+                        .navigationSplitViewColumnWidth(min: 600, ideal: 800)
+                }
+                .navigationSplitViewStyle(.balanced)
+            }
         }
-        .frame(minWidth: 700, minHeight: 500)
+        .frame(minWidth: 1000, minHeight: 600)
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
@@ -181,6 +194,65 @@ struct ContentView: View {
         }
     }
     
+    // ADDED: Sidebar content (moved from selectedFoldersPanel)
+    var sidebarContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Selected Folders")
+                .font(.headline)
+                .padding(.horizontal)
+                .padding(.top)
+            
+            if !vm.discoveredLeafFolders.isEmpty {
+                List {
+                    ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(leafURL.lastPathComponent)
+                                    .font(.system(size: 13, weight: .medium))
+                                
+                                Text(leafURL.path)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            
+                            Spacer()
+                            
+                            if !vm.isProcessing {
+                                Button {
+                                    vm.removeLeafFolder(leafURL)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red.opacity(0.7))
+                                        .font(.system(size: 14))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove this folder")
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .listStyle(.sidebar)
+            } else {
+                VStack(spacing: 8) {
+                    Text("Drop parent folders here to discover image folders.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                    
+                    Button("Open Folder") {
+                        selectFolders()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .navigationTitle("Folders")
+        .frame(minWidth: 250, idealWidth: 300)
+    }
+    
     func selectFolders() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -202,11 +274,97 @@ struct ContentView: View {
         sortOrder.removeAll()
     }
     
-    var mainSplitView: some View {
-        VSplitView {
-            topSplitView
-            bottomSplitView
+    // CHANGED: Table view is now the content column
+    var tableView: some View {
+        Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
+            TableColumn("Reference", value: \.reference) { row in
+                HStack {
+                    // Clickable deletion selection checkbox
+                    Button(action: {
+                        if deletionSelection.contains(row.id) {
+                            deletionSelection.remove(row.id)
+                        } else {
+                            deletionSelection.insert(row.id)
+                        }
+                    }) {
+                        Image(systemName: deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
+                            .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Text(DisplayHelpers.shortDisplayPath(for: row.reference))
+                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                }
+            }
+            
+            TableColumn("Match", value: \.similar) { row in
+                Text(DisplayHelpers.shortDisplayPath(for: row.similar))
+                    .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+            }
+            
+            TableColumn("Percent", value: \.percentSortKey) { row in
+                Text(row.percentDisplay)
+            }
+            .width(70)
         }
+        .tableStyle(.automatic)
+        .navigationTitle("Results")
+    }
+    
+    // CHANGED: Detail split combines duplicates and preview
+    var detailSplitView: some View {
+        VSplitView {
+            duplicatesFolderPanel
+                .frame(minHeight: 200)
+            previewPanel
+                .frame(minHeight: 200)
+        }
+    }
+    
+    // CHANGED: Bottom split is now just for the old layout (not used in sidebar version)
+    var bottomSplitView: some View {
+        HSplitView {
+            // LEFT: table - Native navigation, separate deletion selection
+            Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
+                TableColumn("Reference", value: \.reference) { row in
+                    HStack {
+                        // Clickable deletion selection checkbox
+                        Button(action: {
+                            if deletionSelection.contains(row.id) {
+                                deletionSelection.remove(row.id)
+                            } else {
+                                deletionSelection.insert(row.id)
+                            }
+                        }) {
+                            Image(systemName: deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
+                                .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Text(DisplayHelpers.shortDisplayPath(for: row.reference))
+                            .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                    }
+                }
+                
+                TableColumn("Match", value: \.similar) { row in
+                    Text(DisplayHelpers.shortDisplayPath(for: row.similar))
+                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                }
+                
+                TableColumn("Percent", value: \.percentSortKey) { row in
+                    Text(row.percentDisplay)
+                }
+                .width(70)
+            }
+            .tableStyle(.automatic)
+            .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+            
+            // RIGHT: preview
+            previewPanel
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+        }
+        .navigationTitle("Results")
     }
 }
 

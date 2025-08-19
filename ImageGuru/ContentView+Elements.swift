@@ -38,20 +38,6 @@ extension ContentView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    var topSplitView: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                selectedFoldersPanel
-                    .frame(width: 520)
-                Divider()
-                duplicateFoldersPanel
-                    .frame(minWidth: 220)
-                    .padding()
-            }
-        }
-        .frame(minHeight: 320)
-    }
-    
     var controlsPanelPopover: some View {
         VStack(alignment: .leading, spacing: 16) {
             
@@ -94,74 +80,68 @@ extension ContentView {
         .padding(20)
     }
     
-    var selectedFoldersPanel: some View {
-        VStack {
-            if !vm.discoveredLeafFolders.isEmpty {
-                List {
-                    ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(leafURL.lastPathComponent)
-                                    .font(.system(size: 13, weight: .medium))
-                                
-                                Text(leafURL.path)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
-                            
-                            Spacer()
-                            
-                            if !vm.isProcessing {
-                                Button {
-                                    vm.removeLeafFolder(leafURL)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.red.opacity(0.7))
-                                        .font(.system(size: 14))
-                                }
-                                .buttonStyle(.plain)
-                                .help("Remove this folder")
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
+    // CHANGED: Adjusted for detail column in vertical split
+    var duplicatesFolderPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Duplicate Folder Groups")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                Spacer()
+                if !vm.folderClusters.isEmpty {
+                    Text("\(vm.folderClusters.count) group\(vm.folderClusters.count == 1 ? "" : "s")")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
                 }
-                .frame(minHeight: 150, maxHeight: 300)
-            } else {
-                Text("Drop parent folders here to discover image folders.")
-                    .foregroundStyle(.secondary)
             }
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-    
-    var duplicateFoldersPanel: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Duplicate Folder Groups").font(.headline)
+            .padding(.horizontal)
             
             if vm.folderClusters.isEmpty {
-                Text("No cross-folder duplicate relationships found.")
-                    .foregroundStyle(.secondary)
+                VStack(spacing: 8) {
+                    Image(systemName: "folder.badge.questionmark")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.secondary)
+                    
+                    Text("No cross-folder duplicate relationships found.")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                    
+                    Text("Run an analysis to discover duplicate groups.")
+                        .foregroundStyle(.tertiary)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     ForEach(vm.folderClusters.indices, id: \.self) { i in
                         Section {
                             ForEach(vm.folderClusters[i], id: \.self) { folder in
                                 Button(action: { vm.openFolderInFinder(folder) }) {
-                                    HStack(alignment: .center, spacing: 12) {
+                                    HStack(alignment: .center, spacing: 8) {
                                         let url = URL(fileURLWithPath: folder)
-                                        Text(DisplayHelpers.formatFolderDisplayName(for: url))
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
                                         
-                                        Spacer(minLength: 12)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(DisplayHelpers.formatFolderDisplayName(for: url))
+                                                .font(.system(size: 13, weight: .medium))
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                            
+                                            Text(folder)
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                        }
                                         
-                                        HStack(spacing: 8) {
+                                        Spacer()
+                                        
+                                        HStack(spacing: 6) {
                                             // Simple on-demand thumbnail
                                             if let imagePath = vm.representativeImageByFolder[folder] {
-                                                PreviewImage(path: imagePath, maxDimension: 36)
-                                                    .frame(width: 36, height: 36)
+                                                PreviewImage(path: imagePath, maxDimension: 32)
+                                                    .frame(width: 32, height: 32)
                                                     .clipped()
                                                     .cornerRadius(4)
                                                     .overlay(
@@ -169,11 +149,18 @@ extension ContentView {
                                                             .stroke(Color.gray.opacity(0.25), lineWidth: 1)
                                                     )
                                             }
-                                            Text("\(vm.folderDuplicateCounts[folder, default: 0]) duplicates")
-                                                .foregroundStyle(.secondary)
-                                                .font(.footnote)
+                                            
+                                            VStack(alignment: .trailing, spacing: 1) {
+                                                Text("\(vm.folderDuplicateCounts[folder, default: 0])")
+                                                    .font(.system(size: 14, weight: .semibold))
+                                                    .foregroundStyle(.primary)
+                                                Text("dupes")
+                                                    .font(.system(size: 9))
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
                                     }
+                                    .padding(.vertical, 2)
                                 }
                                 .buttonStyle(.plain)
                                 .help(folder)
@@ -181,61 +168,22 @@ extension ContentView {
                         } header: {
                             HStack {
                                 Text("Group \(i + 1)")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
                                 Spacer()
                                 Text("\(vm.folderClusters[i].count) folder\(vm.folderClusters[i].count == 1 ? "" : "s")")
                                     .foregroundStyle(.secondary)
+                                    .font(.caption2)
                             }
                         }
                     }
                 }
-                .frame(minHeight: 240)
+                .listStyle(.sidebar)
             }
-            Spacer()
-        }
-    }
-    
-    var bottomSplitView: some View {
-        HSplitView {
-            // LEFT: table - Native navigation, separate deletion selection
-            Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
-                TableColumn("Reference", value: \.reference) { row in
-                    HStack {
-                        // Clickable deletion selection checkbox
-                        Button(action: {
-                            if deletionSelection.contains(row.id) {
-                                deletionSelection.remove(row.id)
-                            } else {
-                                deletionSelection.insert(row.id)
-                            }
-                        }) {
-                            Image(systemName: deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
-                                .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
-                        }
-                        .buttonStyle(.plain)
-                        
-                        Text(DisplayHelpers.shortDisplayPath(for: row.reference))
-                            .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
-                    }
-                }
-                
-                TableColumn("Match", value: \.similar) { row in
-                    Text(DisplayHelpers.shortDisplayPath(for: row.similar))
-                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
-                }
-                
-                TableColumn("Percent", value: \.percentSortKey) { row in
-                    Text(row.percentDisplay)
-                }
-                .width(70)
-            }
-            .tableStyle(.automatic)
-            .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
             
-            // RIGHT: preview
-            previewPanel
-                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                .layoutPriority(1)
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     var previewPanel: some View {
