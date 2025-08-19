@@ -36,20 +36,13 @@ struct ContentView: View {
             if vm.isProcessing {
                 processingView
             } else {
-                // CHANGED: Use NavigationSplitView for native sidebar
-                NavigationSplitView {
-                    sidebarContent
-                } content: {
-                    tableView
-                        .navigationSplitViewColumnWidth(min: 500, ideal: 600)
-                } detail: {
-                    detailSplitView
-                        .navigationSplitViewColumnWidth(min: 600, ideal: 800)
+                // IMPROVED: Better responsive layout with GeometryReader
+                GeometryReader { geometry in
+                    adaptiveLayout(for: geometry.size)
                 }
-                .navigationSplitViewStyle(.balanced)
             }
         }
-        .frame(minWidth: 1000, minHeight: 600)
+        .frame(minWidth: 800, minHeight: 500) // REDUCED: More reasonable minimum size
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
@@ -194,14 +187,205 @@ struct ContentView: View {
         }
     }
     
-    // ADDED: Sidebar content (moved from selectedFoldersPanel)
+    // IMPROVED: Adaptive layout that responds to window size
+    @ViewBuilder
+    private func adaptiveLayout(for size: CGSize) -> some View {
+        let isCompact = size.width < 1200
+        let isVeryCompact = size.width < 900
+        
+        if isVeryCompact {
+            // Very compact: Stack vertically with tabs
+            VStack(spacing: 0) {
+                compactTabView
+                Divider()
+                tableView
+                    .frame(height: max(200, size.height * 0.6))
+                Divider()
+                previewPanel
+                    .frame(maxHeight: .infinity)
+            }
+        } else if isCompact {
+            // Compact: Simplified two-column layout
+            NavigationSplitView {
+                compactSidebarContent
+            } detail: {
+                VStack(spacing: 0) {
+                    tableView
+                        .frame(height: max(250, size.height * 0.55))
+                    Divider()
+                    previewPanel
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 300)
+        } else {
+            // Standard: Three-column layout
+            NavigationSplitView {
+                sidebarContent
+            } content: {
+                tableView
+                    .navigationSplitViewColumnWidth(min: 400, ideal: 500)
+            } detail: {
+                detailSplitView
+                    .navigationSplitViewColumnWidth(min: 400, ideal: 600)
+            }
+            .navigationSplitViewStyle(.balanced)
+        }
+    }
+    
+    // IMPROVED: Compact tab view for very small windows
+    private var compactTabView: some View {
+        HStack(spacing: 12) {
+            Text("Folders: \(vm.activeLeafFolders.count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            Spacer()
+            
+            if !vm.folderClusters.isEmpty {
+                Text("Groups: \(vm.folderClusters.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+    
+    // IMPROVED: Compact sidebar for smaller windows
+    private var compactSidebarContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Folders section (more compact)
+            Text("Folders")
+                .font(.headline)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            
+            if !vm.discoveredLeafFolders.isEmpty {
+                List {
+                    ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
+                        compactFolderRow(leafURL)
+                    }
+                }
+                .listStyle(.sidebar)
+            } else {
+                VStack(spacing: 6) {
+                    Text("Drop folders here")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                    
+                    Button("Open") {
+                        selectFolders()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .padding(8)
+            }
+            
+            // Groups section (compact)
+            if !vm.folderClusters.isEmpty {
+                Divider()
+                
+                Text("Groups")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 12)
+                
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(vm.folderClusters.indices, id: \.self) { i in
+                            compactGroupRow(i)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+            }
+        }
+        .navigationTitle("Folders")
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+    
+    // IMPROVED: Compact folder row
+    private func compactFolderRow(_ leafURL: URL) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(leafURL.lastPathComponent)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                
+                Text(leafURL.path)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            
+            Spacer(minLength: 0)
+            
+            if !vm.isProcessing {
+                Button {
+                    vm.removeLeafFolder(leafURL)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.red.opacity(0.7))
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 1)
+    }
+    
+    // IMPROVED: Compact group row
+    private func compactGroupRow(_ index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Group \(index + 1)")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+            
+            ForEach(vm.folderClusters[index].prefix(3), id: \.self) { folder in
+                Button(action: { vm.openFolderInFinder(folder) }) {
+                    HStack(spacing: 4) {
+                        Text(URL(fileURLWithPath: folder).lastPathComponent)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        
+                        Spacer(minLength: 0)
+                        
+                        Text("\(vm.folderDuplicateCounts[folder, default: 0])")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            
+            if vm.folderClusters[index].count > 3 {
+                Text("+ \(vm.folderClusters[index].count - 3) more")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .cornerRadius(4)
+    }
+    
+    // IMPROVED: Original sidebar content with better sizing
     var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Selected Folders")
                 .font(.headline)
                 .padding(.horizontal)
                 .padding(.top)
-            
+                        
             if !vm.discoveredLeafFolders.isEmpty {
                 List {
                     ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
@@ -209,14 +393,17 @@ struct ContentView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(leafURL.lastPathComponent)
                                     .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
                                 
                                 Text(leafURL.path)
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
                                     .textSelection(.enabled)
                             }
                             
-                            Spacer()
+                            Spacer(minLength: 4)
                             
                             if !vm.isProcessing {
                                 Button {
@@ -250,7 +437,7 @@ struct ContentView: View {
             }
         }
         .navigationTitle("Folders")
-        .frame(minWidth: 250, idealWidth: 300)
+        .frame(minWidth: 220, idealWidth: 280) // IMPROVED: Better responsive widths
     }
     
     func selectFolders() {
@@ -274,60 +461,17 @@ struct ContentView: View {
         sortOrder.removeAll()
     }
     
-    // CHANGED: Table view is now the content column
+    // IMPROVED: Table view with better column sizing
     var tableView: some View {
-        Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
-            TableColumn("Reference", value: \.reference) { row in
-                HStack {
-                    // Clickable deletion selection checkbox
-                    Button(action: {
-                        if deletionSelection.contains(row.id) {
-                            deletionSelection.remove(row.id)
-                        } else {
-                            deletionSelection.insert(row.id)
-                        }
-                    }) {
-                        Image(systemName: deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
-                            .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Text(DisplayHelpers.shortDisplayPath(for: row.reference))
-                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
-                }
-            }
+        GeometryReader { geometry in
+            let availableWidth = geometry.size.width - 100 // Account for padding and percent column
+            let checkboxWidth: CGFloat = 40
+            let percentWidth: CGFloat = 70
+            let pathWidth = (availableWidth - checkboxWidth - percentWidth) / 2
             
-            TableColumn("Match", value: \.similar) { row in
-                Text(DisplayHelpers.shortDisplayPath(for: row.similar))
-                    .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
-            }
-            
-            TableColumn("Percent", value: \.percentSortKey) { row in
-                Text(row.percentDisplay)
-            }
-            .width(70)
-        }
-        .tableStyle(.automatic)
-        .navigationTitle("Results")
-    }
-    
-    // CHANGED: Detail split combines duplicates and preview
-    var detailSplitView: some View {
-        VSplitView {
-            duplicatesFolderPanel
-                .frame(minHeight: 200)
-            previewPanel
-                .frame(minHeight: 200)
-        }
-    }
-    
-    // CHANGED: Bottom split is now just for the old layout (not used in sidebar version)
-    var bottomSplitView: some View {
-        HSplitView {
-            // LEFT: table - Native navigation, separate deletion selection
             Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
                 TableColumn("Reference", value: \.reference) { row in
-                    HStack {
+                    HStack(spacing: 8) {
                         // Clickable deletion selection checkbox
                         Button(action: {
                             if deletionSelection.contains(row.id) {
@@ -340,34 +484,47 @@ struct ContentView: View {
                                 .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
                         }
                         .buttonStyle(.plain)
+                        .frame(width: 20)
                         
                         Text(DisplayHelpers.shortDisplayPath(for: row.reference))
                             .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                 }
+                .width(min: 150, ideal: pathWidth, max: .infinity)
                 
                 TableColumn("Match", value: \.similar) { row in
                     Text(DisplayHelpers.shortDisplayPath(for: row.similar))
                         .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
+                .width(min: 150, ideal: pathWidth, max: .infinity)
                 
                 TableColumn("Percent", value: \.percentSortKey) { row in
                     Text(row.percentDisplay)
+                        .font(.system(.body, design: .monospaced))
                 }
-                .width(70)
+                .width(percentWidth)
             }
             .tableStyle(.automatic)
-            .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
-            
-            // RIGHT: preview
-            previewPanel
-                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                .layoutPriority(1)
         }
         .navigationTitle("Results")
     }
-}
-
-struct LeafFolderRow {
-    let url: URL
+    
+    // IMPROVED: Detail split with better sizing
+    var detailSplitView: some View {
+        GeometryReader { geometry in
+            let totalHeight = geometry.size.height
+            let duplicatesHeight = min(max(150, totalHeight * 0.4), totalHeight - 200)
+            
+            VSplitView {
+                duplicatesFolderPanel
+                    .frame(height: duplicatesHeight)
+                previewPanel
+                    .frame(minHeight: 150)
+            }
+        }
+    }
 }
