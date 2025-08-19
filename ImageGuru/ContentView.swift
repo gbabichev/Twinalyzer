@@ -8,8 +8,9 @@ struct ContentView: View {
     
     @State var showSettingsPopover = false
     
-    // CHANGED: Multi-selection support instead of single selection
-    @State var selectedRowIDs: Set<String> = []
+    // CHANGED: Separate table focus from deletion selection
+    @State var tableSelection: Set<String> = [] // For table focus/navigation
+    @State var deletionSelection: Set<String> = [] // For actual deletion checkboxes
     @State var sortOrder: [KeyPathComparator<TableRow>] = []
 
     var sortedRows: [TableRow] {
@@ -18,15 +19,15 @@ struct ContentView: View {
         return rows.sorted(using: sortOrder)
     }
 
-    // CHANGED: Use first selected row for preview
+    // CHANGED: Use table focused row for preview
     var selectedRow: TableRow? {
-        guard let firstID = selectedRowIDs.first else { return nil }
+        guard let firstID = tableSelection.first else { return nil }
         return sortedRows.first(where: { $0.id == firstID })
     }
     
-    // CHANGED: Get selected MATCH file paths for deletion (not references)
+    // CHANGED: Get deletion selected MATCH file paths
     var selectedMatchPaths: [String] {
-        let selectedRows = sortedRows.filter { selectedRowIDs.contains($0.id) }
+        let selectedRows = sortedRows.filter { deletionSelection.contains($0.id) }
         return selectedRows.map { $0.similar } // Only delete the matched photos, not references
     }
 
@@ -72,21 +73,35 @@ struct ContentView: View {
 
             // RIGHT: Primary actions.
             ToolbarItemGroup(placement: .primaryAction) {
+                // ADDED: Clear selection button
+                if !deletionSelection.isEmpty {
+                    Button {
+                        deletionSelection.removeAll()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle")
+                            Text("Clear")
+                                .font(.caption)
+                        }
+                    }
+                    .help("Clear selection (\(deletionSelection.count) item\(deletionSelection.count == 1 ? "" : "s"))")
+                }
+                
                 // ADDED: Delete selected button
-                if !selectedRowIDs.isEmpty {
+                if !deletionSelection.isEmpty {
                     Button {
                         vm.deleteSelectedMatches(selectedMatches: selectedMatchPaths)
-                        selectedRowIDs.removeAll() // Clear selection after deletion
+                        deletionSelection.removeAll() // Clear selection after deletion
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "trash")
-                            Text("\(selectedRowIDs.count)")
+                            Text("\(deletionSelection.count)")
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
                     }
                     .keyboardShortcut(.delete, modifiers: [])
-                    .help("Delete \(selectedRowIDs.count) selected match\(selectedRowIDs.count == 1 ? "" : "es")")
+                    .help("Delete \(deletionSelection.count) selected match\(deletionSelection.count == 1 ? "" : "es")")
                 }
                 
                 if vm.isProcessing {
@@ -107,19 +122,35 @@ struct ContentView: View {
                 }
             }
         }
-        // ADDED: Space key support for selection
+        // ADDED: Space bar to toggle deletion checkbox(es) - supports multi-row
         .onKeyPress(.space) {
-            // Toggle selection of currently focused row
-            if let focusedRow = sortedRows.first(where: { selectedRowIDs.contains($0.id) }) {
-                // If we have a selection, space toggles the first selected item
-                if selectedRowIDs.contains(focusedRow.id) {
-                    selectedRowIDs.remove(focusedRow.id)
+            guard !tableSelection.isEmpty else { return .handled }
+            
+            // If multiple rows are table-selected, toggle all of them
+            if tableSelection.count > 1 {
+                // Check if all selected rows are already checked for deletion
+                let allChecked = tableSelection.allSatisfy { deletionSelection.contains($0) }
+                
+                if allChecked {
+                    // If all are checked, uncheck all
+                    for rowID in tableSelection {
+                        deletionSelection.remove(rowID)
+                    }
                 } else {
-                    selectedRowIDs.insert(focusedRow.id)
+                    // If some/none are checked, check all
+                    for rowID in tableSelection {
+                        deletionSelection.insert(rowID)
+                    }
                 }
-            } else if let firstRow = sortedRows.first {
-                // If no selection, select the first row
-                selectedRowIDs.insert(firstRow.id)
+            } else {
+                // Single row - toggle as before
+                guard let focusedID = tableSelection.first else { return .handled }
+                
+                if deletionSelection.contains(focusedID) {
+                    deletionSelection.remove(focusedID)
+                } else {
+                    deletionSelection.insert(focusedID)
+                }
             }
             return .handled
         }
@@ -165,8 +196,9 @@ struct ContentView: View {
     func clearAll() {
         vm.clearAll()
         
-        // CHANGED: Clear multi-selection instead of single selection
-        selectedRowIDs.removeAll()
+        // CHANGED: Clear both selections
+        tableSelection.removeAll()
+        deletionSelection.removeAll()
         sortOrder.removeAll()
     }
     

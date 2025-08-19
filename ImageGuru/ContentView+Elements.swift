@@ -196,11 +196,26 @@ extension ContentView {
     
     var bottomSplitView: some View {
         HSplitView {
-            // LEFT: table - CHANGED to support multi-selection
-            Table(sortedRows, selection: $selectedRowIDs, sortOrder: $sortOrder) {
+            // LEFT: table - Native navigation, separate deletion selection
+            Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
                 TableColumn("Reference", value: \.reference) { row in
-                    Text(DisplayHelpers.shortDisplayPath(for: row.reference))
-                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                    HStack {
+                        // Clickable deletion selection checkbox
+                        Button(action: {
+                            if deletionSelection.contains(row.id) {
+                                deletionSelection.remove(row.id)
+                            } else {
+                                deletionSelection.insert(row.id)
+                            }
+                        }) {
+                            Image(systemName: deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
+                                .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Text(DisplayHelpers.shortDisplayPath(for: row.reference))
+                            .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                    }
                 }
                 
                 TableColumn("Match", value: \.similar) { row in
@@ -213,6 +228,7 @@ extension ContentView {
                 }
                 .width(70)
             }
+            .tableStyle(.automatic)
             .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
             
             // RIGHT: preview
@@ -255,8 +271,8 @@ extension ContentView {
             } else {
                 VStack(spacing: 8) {
                     // CHANGED: Show selection count when multiple items selected
-                    if selectedRowIDs.count > 1 {
-                        Text("\(selectedRowIDs.count) matches selected")
+                    if deletionSelection.count > 1 {
+                        Text("\(deletionSelection.count) matches selected")
                             .foregroundStyle(.secondary)
                         Text("Press Delete or use toolbar button to delete selected matches")
                             .foregroundStyle(.secondary)
