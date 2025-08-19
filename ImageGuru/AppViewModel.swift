@@ -20,7 +20,7 @@ final class AppViewModel: ObservableObject {
     // MARK: - Computed Properties (replaces all the caching)
     
     var foldersToScanLabel: String {
-        let leafs = findLeafFolders(from: selectedFolderURLs)
+        let leafs = FileSystemHelpers.findLeafFolders(from: selectedFolderURLs)
         return leafs.map { $0.lastPathComponent }.joined(separator: "\n")
     }
     
@@ -208,34 +208,6 @@ final class AppViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Helper
-    private func findLeafFolders(from urls: [URL]) -> [URL] {
-        let fileManager = FileManager.default
-        var leafFolders = [URL]()
-        var seen = Set<URL>()
-
-        func recurse(_ url: URL) {
-            if let contents = try? fileManager.contentsOfDirectory(
-                at: url,
-                includingPropertiesForKeys: [.isDirectoryKey]
-            ) {
-                let subfolders = contents.filter {
-                    (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                }
-                if subfolders.isEmpty {
-                    if seen.insert(url).inserted {
-                        leafFolders.append(url)
-                    }
-                } else {
-                    subfolders.forEach(recurse)
-                }
-            }
-        }
-
-        urls.forEach(recurse)
-        return leafFolders
-    }
-    
     func clearAll() {
         // Cancel any running analysis
         cancelAnalysis()
@@ -246,5 +218,4 @@ final class AppViewModel: ObservableObject {
         // Clear all analysis results
         comparisonResults.removeAll()
     }
-    
 }

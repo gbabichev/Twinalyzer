@@ -2,7 +2,6 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-
 struct PreviewImage: View {
     let path: String
     let maxDimension: CGFloat
@@ -30,14 +29,6 @@ struct PreviewImage: View {
         return "\(path)::\(bucket)"
     }
 
-    private static func bucket(for dim: CGFloat) -> Int {
-        if dim <= 320 { return 320 }
-        if dim <= 640 { return 640 }
-        if dim <= 1024 { return 1024 }
-        if dim <= 1600 { return 1600 }
-        return 2048
-    }
-
     @MainActor private func setImage(_ img: NSImage?) { self.image = img }
 
     private func load() async {
@@ -49,7 +40,7 @@ struct PreviewImage: View {
             return
         }
 
-        let bucket = Self.bucket(for: maxDimension)
+        let bucket = ImageProcessingUtilities.cacheBucket(for: maxDimension)
         let url = URL(fileURLWithPath: path)
 
         // Do the decoding off-main
@@ -67,4 +58,3 @@ struct PreviewImage: View {
         }
     }
 }
-

@@ -1,12 +1,4 @@
 //
-//  FolderRow.swift
-//  ImageGuru
-//
-//  Created by George Babichev on 8/19/25.
-//
-
-
-//
 //  FolderModels.swift
 //  ImageGuru
 //

@@ -7,10 +7,10 @@ extension ContentView {
         VStack(spacing: 16) {
             if let p = vm.processingProgress {
                 ProgressView(value: p).frame(width: 320)
-                Text("\(Int(p * 100))%").foregroundStyle(.secondary)
+                Text(DisplayHelpers.formatProcessingProgress(p)).foregroundStyle(.secondary)
             } else {
                 ProgressView().frame(width: 320)
-                Text("Preparing…").foregroundStyle(.secondary)
+                Text(DisplayHelpers.formatProcessingProgress(nil)).foregroundStyle(.secondary)
             }
             
             VStack(alignment: .leading, spacing: 6) {
@@ -24,7 +24,7 @@ extension ContentView {
                     ScrollView(showsIndicators: true) {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(vm.allFoldersBeingProcessed, id: \.self) { url in
-                                Text(shortDisplayPath(for: url.path))
+                                Text(DisplayHelpers.shortDisplayPath(for: url.path))
                                     .font(.footnote)
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
@@ -68,7 +68,7 @@ extension ContentView {
                 VStack {
                     Text("Similarity Threshold")
                     Slider(value: $vm.similarityThreshold, in: 0.45...1.0, step: 0.025)
-                    Text(String(format: "%.0f%%", vm.similarityThreshold * 100))
+                    Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -87,11 +87,10 @@ extension ContentView {
         }
     }
     
-    
     var selectedFoldersPanel: some View {
         VStack {
-            if !sortedLeafFolders.isEmpty {
-                Table(sortedLeafFolders, selection: $selectedLeafIDs, sortOrder: $leafSortOrder) {
+            if !folderVM.sortedLeafFolders.isEmpty {
+                Table(folderVM.sortedLeafFolders, selection: $folderVM.selectedLeafIDs, sortOrder: $folderVM.leafSortOrder) {
                     TableColumn("Folder Name", value: \.displayName) { leaf in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(leaf.url.lastPathComponent)
@@ -109,7 +108,7 @@ extension ContentView {
                         HStack {
                             if !vm.isProcessing {
                                 Button {
-                                    removeLeaf(leaf)
+                                    folderVM.removeLeaf(leaf)
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundColor(.red.opacity(0.7))
@@ -127,29 +126,29 @@ extension ContentView {
                 .contextMenu(forSelectionType: UUID.self) { selectedIDs in
                     if !selectedIDs.isEmpty && !vm.isProcessing {
                         Button("Remove Selected (\(selectedIDs.count))") {
-                            removeLeafs(withIDs: selectedIDs)
+                            folderVM.removeLeafs(withIDs: selectedIDs)
                         }
                         
                         Divider()
                         
                         Button("Select All") {
-                            selectedLeafIDs = Set(sortedLeafFolders.map(\.id))
+                            folderVM.selectAllLeafs()
                         }
-                        .disabled(selectedLeafIDs.count == sortedLeafFolders.count)
+                        .disabled(!folderVM.canSelectAll)
                         
                         Button("Deselect All") {
-                            selectedLeafIDs.removeAll()
+                            folderVM.deselectAllLeafs()
                         }
-                        .disabled(selectedLeafIDs.isEmpty)
+                        .disabled(!folderVM.canDeselectAll)
                     } else if !vm.isProcessing {
                         Button("Select All") {
-                            selectedLeafIDs = Set(sortedLeafFolders.map(\.id))
+                            folderVM.selectAllLeafs()
                         }
                     }
                 }
                 .onDeleteCommand {
-                    if !selectedLeafIDs.isEmpty && !vm.isProcessing {
-                        removeSelectedLeafs()
+                    if folderVM.canRemoveSelected {
+                        folderVM.removeSelectedLeafs()
                     }
                 }
             } else {
@@ -160,26 +159,22 @@ extension ContentView {
         .frame(maxHeight: .infinity, alignment: .top)
     }
     
-    
-    
     var duplicateFoldersPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Duplicate Folder Groups").font(.headline)
             
-            if vm.folderClusters.isEmpty {  // Changed from vm.cachedClusters
+            if vm.folderClusters.isEmpty {
                 Text("No cross-folder duplicate relationships found.")
                     .foregroundStyle(.secondary)
             } else {
                 List {
-                    ForEach(vm.folderClusters.indices, id: \.self) { i in  // Changed from vm.cachedClusters
+                    ForEach(vm.folderClusters.indices, id: \.self) { i in
                         Section {
-                            ForEach(vm.folderClusters[i], id: \.self) { folder in  // Changed from vm.cachedClusters
+                            ForEach(vm.folderClusters[i], id: \.self) { folder in
                                 Button(action: { vm.openFolderInFinder(folder) }) {
                                     HStack(alignment: .center, spacing: 12) {
                                         let url = URL(fileURLWithPath: folder)
-                                        let name = url.lastPathComponent
-                                        let parent = url.deletingLastPathComponent().lastPathComponent
-                                        Text(parent.isEmpty ? name : "\(parent)/\(name)")
+                                        Text(DisplayHelpers.formatFolderDisplayName(for: url))
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                         
@@ -210,7 +205,7 @@ extension ContentView {
                             HStack {
                                 Text("Group \(i + 1)")
                                 Spacer()
-                                Text("\(vm.folderClusters[i].count) folder\(vm.folderClusters[i].count == 1 ? "" : "s")")  // Changed from vm.cachedClusters
+                                Text("\(vm.folderClusters[i].count) folder\(vm.folderClusters[i].count == 1 ? "" : "s")")
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -227,13 +222,13 @@ extension ContentView {
             // LEFT: table
             Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
                 TableColumn("Reference", value: \.reference) { row in
-                    Text(shortDisplayPath(for: row.reference))
-                        .foregroundStyle(isCrossFolder(row) ? .red : .primary)
+                    Text(DisplayHelpers.shortDisplayPath(for: row.reference))
+                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
                 }
                 
                 TableColumn("Match", value: \.similar) { row in
-                    Text(shortDisplayPath(for: row.similar))
-                        .foregroundStyle(isCrossFolder(row) ? .red : .primary)
+                    Text(DisplayHelpers.shortDisplayPath(for: row.similar))
+                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
                 }
                 
                 TableColumn("Percent", value: \.percentSortKey) { row in
@@ -252,7 +247,7 @@ extension ContentView {
     
     var previewPanel: some View {
         VStack {
-            if let row = selectedRow, !vm.flattenedResults.isEmpty {  // Changed from vm.cachedFlattened
+            if let row = selectedRow, !vm.flattenedResults.isEmpty {
                 GeometryReader { geo in
                     let spacing: CGFloat = 20
                     let inset: CGFloat = 16
@@ -263,15 +258,15 @@ extension ContentView {
                     HStack(alignment: .top, spacing: spacing) {
                         VStack(spacing: 8) {
                             Text("Reference")
-                            Text(shortDisplayPath(for: row.reference))
+                            Text(DisplayHelpers.shortDisplayPath(for: row.reference))
                             PreviewImage(path: row.reference, maxDimension: maxDim)
                                 .clipped()
                             Button("Delete Reference") { vm.deleteFile(row.reference) }
                         }
                         VStack(spacing: 8) {
                             Text("Match")
-                            Text(shortDisplayPath(for: row.similar))
-                                .foregroundStyle(isCrossFolder(row) ? .red : .primary)
+                            Text(DisplayHelpers.shortDisplayPath(for: row.similar))
+                                .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
                             PreviewImage(path: row.similar, maxDimension: maxDim)
                                 .clipped()
                             Button("Delete Match") { vm.deleteFile(row.similar) }
@@ -289,7 +284,4 @@ extension ContentView {
             }
         }
     }
-    
-    
-    
 }

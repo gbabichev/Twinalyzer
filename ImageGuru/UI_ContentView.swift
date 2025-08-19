@@ -3,41 +3,11 @@ import AppKit
 import ImageIO
 import UniformTypeIdentifiers
 
-
 struct ContentView: View {
-
     @EnvironmentObject var vm: AppViewModel
-
-
+    @StateObject var folderVM: FolderSelectionViewModel
+    
     @State var showSettingsPopover = false
-    
- 
-    
-    @State var selectedLeafIDs: Set<UUID> = []
-    @State var leafSortOrder: [KeyPathComparator<LeafFolder>] = []
-
-    // Add this computed property to ContentView
-    var sortedLeafFolders: [LeafFolder] {
-        guard !vm.selectedFolderURLs.isEmpty else { return [] }
-        
-        // Find all leaf folders from the selected parent folders
-        let foundLeafs = findLeafFolders(from: vm.selectedFolderURLs)
-        let folders = foundLeafs.map { LeafFolder(url: $0) }
-        
-        // Apply sorting based on current sort order or default
-        if leafSortOrder.isEmpty {
-            return folders.sorted { $0.url.path.localizedCaseInsensitiveCompare($1.url.path) == .orderedAscending }
-        } else {
-            return folders.sorted(using: leafSortOrder)
-        }
-    }
-
-    
-    
-    
-
-
-
     
     // Selection + sorting remains in the view for keyboard focus reasons
     @State var selectedRowID: String? = nil
@@ -45,8 +15,16 @@ struct ContentView: View {
     @State var toggleVersion = 0
     @State var sortOrder: [KeyPathComparator<TableRow>] = []
 
+    // Custom initializer to properly connect the ViewModels
+    init() {
+        // We'll get the AppViewModel from the environment, but we need to create the folder VM
+        // This is a bit tricky with @EnvironmentObject, so we'll use a placeholder for now
+        // and properly initialize it in onAppear
+        _folderVM = StateObject(wrappedValue: FolderSelectionViewModel(appViewModel: nil))
+    }
+
     var sortedRows: [TableRow] {
-        let rows = vm.flattenedResults  // Changed from vm.cachedFlattened
+        let rows = vm.flattenedResults
         guard !sortOrder.isEmpty else { return rows }
         return rows.sorted(using: sortOrder)
     }
@@ -56,7 +34,7 @@ struct ContentView: View {
     }
 
     var selectedMatches: [String] {
-        vm.flattenedResults.filter { selectedRowIDs.contains($0.id) }.map { $0.similar }  // Changed from vm.cachedFlattened
+        vm.flattenedResults.filter { selectedRowIDs.contains($0.id) }.map { $0.similar }
     }
 
     private var settingsPopoverContent: some View {
@@ -67,7 +45,6 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(width: 350)
-        
     }
     
     var body: some View {
@@ -76,12 +53,16 @@ struct ContentView: View {
             else { mainSplitView }
         }
         .frame(minWidth: 700, minHeight: 500)
-        .onAppear { installSpacebarToggle() }
+        .onAppear {
+            // Initialize the folder VM with the actual app VM
+            folderVM.setAppViewModel(vm)
+            installSpacebarToggle()
+        }
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
                 Button {
-                    selectFoldersAndLeafs()
+                    folderVM.selectFoldersAndLeafs()
                 } label: {
                     Label("Open Folder", systemImage: "folder")
                 }
@@ -96,13 +77,6 @@ struct ContentView: View {
                 .disabled(vm.selectedFolderURLs.isEmpty)
                 .help("Clear all selected folders")
                 
-//                Button {
-//                    clearAll()
-//                } label: {
-//                    Label("Clear View", systemImage: "arrow.counterclockwise")
-//                }
-//                .help("Clear selections and logs (does not delete files).")
-                
                 Button {
                     showSettingsPopover = true
                 } label: {
@@ -112,7 +86,8 @@ struct ContentView: View {
                     settingsPopoverContent
                 }
             }
-                // CENTER: Title describing the app
+            
+            // CENTER: Title describing the app
             ToolbarItem(placement: .principal){
                 Spacer()
             }
@@ -136,7 +111,6 @@ struct ContentView: View {
                     .disabled(vm.selectedFolderURLs.isEmpty)
                 }
             }
-
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             Task {
@@ -156,7 +130,7 @@ struct ContentView: View {
                 
                 await MainActor.run {
                     if !droppedURLs.isEmpty {
-                        addFolders(droppedURLs)
+                        folderVM.addFolders(droppedURLs)
                     }
                 }
             }
@@ -164,71 +138,13 @@ struct ContentView: View {
             return true
         }
     }
-
-    
-// ----
-    
-    
-    func removeLeaf(_ leaf: LeafFolder) {
-            // Remove this specific leaf folder
-            // Since we're working with computed leafFolders, we need to update the parent selection
-            // This is tricky - we might need to track which parent contributed this leaf
-            // For now, let's just refresh the selection
-            selectedLeafIDs.remove(leaf.id)
-        }
-    
-    func removeLeafs(withIDs ids: Set<UUID>) {
-        selectedLeafIDs.subtract(ids)
-    }
-    
-    func removeSelectedLeafs() {
-        selectedLeafIDs.removeAll()
-    }
-        
-    func addFolders(_ urls: [URL]) {
-        // Same logic as selectFoldersAndLeafs but without the file picker
-        let newFolders = urls.filter { url in
-            var isDirectory: ObjCBool = false
-            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
-        }
-        
-        let existingFolders = Set(vm.selectedFolderURLs.map { $0.standardizedFileURL })
-        
-        // Filter out duplicates and add new folders
-        let uniqueNewFolders = newFolders.filter { !existingFolders.contains($0.standardizedFileURL) }
-        vm.selectedFolderURLs.append(contentsOf: uniqueNewFolders)
-        
-        // Auto-select all discovered leaf folders (both existing and new)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            selectedLeafIDs = Set(sortedLeafFolders.map(\.id))
-        }
-    }
-
-    // Update selectFoldersAndLeafs to use the new helper:
-    func selectFoldersAndLeafs() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true
-        panel.title = "Select Parent Folders to Scan"
-
-        if panel.runModal() == .OK {
-            addFolders(panel.urls)
-        }
-    }
-    
-    func clearAllFolders() {
-        vm.selectedFolderURLs.removeAll()
-        selectedLeafIDs.removeAll()
-    }
     
     func clearAll() {
         // Cancel any running analysis
         vm.cancelAnalysis()
         
-        // Clear selected folders and leaf selections
-        vm.selectedFolderURLs.removeAll()
-        selectedLeafIDs.removeAll()
+        // Clear folders via folderVM
+        folderVM.clearAllFolders()
         
         // Clear all analysis results (this clears matches, duplicate groups, etc.)
         vm.comparisonResults.removeAll()
@@ -237,14 +153,11 @@ struct ContentView: View {
         selectedRowID = nil
         selectedRowIDs.removeAll()
         sortOrder.removeAll()
-        leafSortOrder.removeAll()
         
         // Reset toggle version (if this affects any UI state)
         toggleVersion = 0
     }
     
-    
-// ------
     var mainSplitView: some View {
         VSplitView {
             topSplitView
