@@ -80,16 +80,17 @@ extension ContentView {
         .padding(20)
     }
     
-    // IMPROVED: More responsive duplicates folder panel
+    // Replace the duplicatesFolderPanel in ContentView+Elements.swift
+
     var duplicatesFolderPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Duplicate Folder Groups")
+                Text("Cross-Folder Duplicates")
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()
                 if !vm.folderClusters.isEmpty {
-                    Text("\(vm.folderClusters.count) group\(vm.folderClusters.count == 1 ? "" : "s")")
+                    Text("\(vm.folderClusters.count) relationship\(vm.folderClusters.count == 1 ? "" : "s")")
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 }
@@ -100,7 +101,7 @@ extension ContentView {
             if vm.folderClusters.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "folder.badge.questionmark")
-                        .font(.system(size: 24)) // REDUCED: Smaller icon for better scaling
+                        .font(.system(size: 24))
                         .foregroundStyle(.secondary)
                     
                     Text("No cross-folder duplicate relationships found.")
@@ -108,22 +109,28 @@ extension ContentView {
                         .font(.subheadline)
                         .multilineTextAlignment(.center)
                     
-                    Text("Run an analysis to discover duplicate groups.")
+                    Text("Run an analysis to discover duplicates between different folders.")
                         .foregroundStyle(.tertiary)
                         .font(.caption)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                // IMPROVED: More compact list with adaptive sizing
                 GeometryReader { geometry in
                     let isCompact = geometry.size.height < 200
                     
                     List {
-                        ForEach(vm.folderClusters.indices, id: \.self) { i in
+                        ForEach(Array(vm.folderClusters.enumerated()), id: \.offset) { i, cluster in
                             Section {
-                                ForEach(vm.folderClusters[i], id: \.self) { folder in
-                                    responsiveFolderRow(folder: folder, isCompact: isCompact)
+                                // Show all folders in the cluster as peers
+                                ForEach(cluster.indices, id: \.self) { j in
+                                    let folder = cluster[j]
+                                    
+                                    responsiveFolderRow(
+                                        folder: folder,
+                                        isCompact: isCompact,
+                                        isReference: false // No special reference styling for simple pairs
+                                    )
                                 }
                             } header: {
                                 HStack {
@@ -131,7 +138,7 @@ extension ContentView {
                                         .font(isCompact ? .caption2 : .caption)
                                         .fontWeight(.medium)
                                     Spacer()
-                                    Text("\(vm.folderClusters[i].count) folder\(vm.folderClusters[i].count == 1 ? "" : "s")")
+                                    Text("\(cluster.count) folder\(cluster.count == 1 ? "" : "s")")
                                         .foregroundStyle(.secondary)
                                         .font(isCompact ? .caption2 : .caption2)
                                 }
@@ -146,26 +153,21 @@ extension ContentView {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
-    // IMPROVED: Responsive folder row that adapts to available space
-    private func responsiveFolderRow(folder: String, isCompact: Bool) -> some View {
+
+    // Update the responsiveFolderRow function to show reference vs match
+    private func responsiveFolderRow(folder: String, isCompact: Bool, isReference: Bool = false) -> some View {
         Button(action: { vm.openFolderInFinder(folder) }) {
             HStack(alignment: .center, spacing: isCompact ? 4 : 8) {
                 let url = URL(fileURLWithPath: folder)
+                let displayName = DisplayHelpers.formatFolderDisplayName(for: url)
                 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(DisplayHelpers.formatFolderDisplayName(for: url))
+                    Text(displayName)
                         .font(.system(size: isCompact ? 11 : 13, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     
-                    if !isCompact {
-                        Text(folder)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
+                    // Remove the full path subtitle for cleaner look
                 }
                 
                 Spacer(minLength: 0)
@@ -184,7 +186,7 @@ extension ContentView {
                     }
                     
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text("\(vm.folderDuplicateCounts[folder, default: 0])")
+                        Text("\(vm.crossFolderDuplicateCounts[folder, default: 0])")
                             .font(.system(size: isCompact ? 11 : 14, weight: .semibold))
                             .foregroundStyle(.primary)
                         if !isCompact {
@@ -198,7 +200,7 @@ extension ContentView {
             .padding(.vertical, isCompact ? 1 : 2)
         }
         .buttonStyle(.plain)
-        .help(folder)
+        .help("Folder: \(folder)")
     }
     
     // IMPROVED: Much more responsive preview panel

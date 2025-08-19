@@ -68,49 +68,45 @@ final class AppViewModel: ObservableObject {
         return representatives
     }
     
+    // Replace the folderClusters computed property in AppViewModel.swift
+
     var folderClusters: [[String]] {
-        // Build folder adjacency from duplicates
-        var adjacency: [String: Set<String>] = [:]
-        for result in comparisonResults {
-            let folders = Set(([result.reference] + result.similars.map { $0.path }).map {
-                URL(fileURLWithPath: $0).deletingLastPathComponent().path
-            })
-            for folder in folders {
-                var connections = adjacency[folder] ?? []
-                for otherFolder in folders where otherFolder != folder {
-                    connections.insert(otherFolder)
-                }
-                adjacency[folder] = connections
-            }
+        // Use the flattened table data which already has correct reference/match pairs
+        var folderPairs: Set<[String]> = []
+        
+        for row in flattenedResults {
+            let referenceFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            
+            // Only include cross-folder duplicates
+            guard referenceFolder != matchFolder else { continue }
+            
+            // Create sorted pair to avoid duplicates (Folder1,Folder2 same as Folder2,Folder1)
+            let sortedPair = [referenceFolder, matchFolder].sorted()
+            folderPairs.insert(sortedPair)
         }
         
-        // Find connected components
-        var visited = Set<String>()
-        var clusters: [[String]] = []
+        // Return as array, sorted by first folder name
+        return Array(folderPairs).sorted { $0[0] < $1[0] }
+    }
+
+    // Add new computed property for cross-folder duplicate counts
+    var crossFolderDuplicateCounts: [String: Int] {
+        var counts: [String: Int] = [:]
         
-        for folder in adjacency.keys {
-            if visited.contains(folder) { continue }
+        for row in flattenedResults {
+            let referenceFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
             
-            var cluster: [String] = []
-            var stack = [folder]
-            visited.insert(folder)
+            // Only count cross-folder duplicates
+            guard referenceFolder != matchFolder else { continue }
             
-            while let current = stack.popLast() {
-                cluster.append(current)
-                for neighbor in adjacency[current] ?? [] {
-                    if !visited.contains(neighbor) {
-                        visited.insert(neighbor)
-                        stack.append(neighbor)
-                    }
-                }
-            }
-            
-            if cluster.count > 1 {
-                clusters.append(cluster.sorted())
-            }
+            // Count the duplicate in both folders
+            counts[referenceFolder, default: 0] += 1
+            counts[matchFolder, default: 0] += 1
         }
         
-        return clusters
+        return counts
     }
     
     var allFoldersBeingProcessed: [URL] {
