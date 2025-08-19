@@ -3,42 +3,6 @@ import AppKit
 import ImageIO
 import UniformTypeIdentifiers
 
-enum AnalysisMode: String, CaseIterable, Identifiable {
-    case perceptualHash = "Perceptual Hash"
-    case deepFeature = "Deep Feature Embedding"
-    var id: String { rawValue }
-}
-
-/// Root view using a lightweight state and a dedicated AppViewModel for data/logic.
-
-struct FolderRow: Identifiable {
-    let id: Int
-    let index: Int
-    let url: URL
-    
-    init(index: Int, url: URL) {
-        self.id = index
-        self.index = index
-        self.url = url
-    }
-}
-
-struct LeafFolder: Identifiable, Comparable, Sendable {
-    let id = UUID()
-    let url: URL
-    
-    var displayName: String {
-        url.lastPathComponent
-    }
-    
-    static func < (lhs: LeafFolder, rhs: LeafFolder) -> Bool {
-        lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-    }
-    
-    static func == (lhs: LeafFolder, rhs: LeafFolder) -> Bool {
-        lhs.url == rhs.url
-    }
-}
 
 struct ContentView: View {
 

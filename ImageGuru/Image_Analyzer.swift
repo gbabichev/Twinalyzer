@@ -9,28 +9,6 @@ import ImageIO
 @preconcurrency import Vision
 @preconcurrency import CoreImage
 
-// MARK: - Row Models
-
-public struct TableRow: Identifiable, Hashable, Sendable {
-    public var id: String { reference + "::" + similar }
-    public let reference: String
-    public let similar: String
-    public let percent: Double
-}
-
-public struct ImageComparisonResult: Identifiable, Sendable, Equatable, Hashable {
-    public let id: UUID
-    public let reference: String
-    public let similars: [(path: String, percent: Double)]
-
-    public init(reference: String, similars: [(path: String, percent: Double)]) {
-        self.id = UUID()
-        self.reference = reference
-        self.similars = similars
-    }
-    public static func == (lhs: ImageComparisonResult, rhs: ImageComparisonResult) -> Bool { lhs.id == rhs.id }
-    public func hash(into h: inout Hasher) { h.combine(id) }
-}
 
 // MARK: - Analyzer
 

@@ -248,16 +248,3 @@ final class AppViewModel: ObservableObject {
     }
     
 }
-
-// Background-safe thumbnailing
-nonisolated
-func downsampledCGImage(at url: URL, targetMaxDimension: CGFloat) -> CGImage? {
-    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-    let options: [CFString: Any] = [
-        kCGImageSourceCreateThumbnailFromImageAlways: true,
-        kCGImageSourceCreateThumbnailWithTransform: true,
-        kCGImageSourceShouldCache: false,
-        kCGImageSourceThumbnailMaxPixelSize: Int(targetMaxDimension)
-    ]
-    return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
-}

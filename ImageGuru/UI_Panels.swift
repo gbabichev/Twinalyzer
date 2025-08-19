@@ -293,9 +293,3 @@ extension ContentView {
     
     
 }
-
-extension TableRow {
-    var percentInt: Int { Int((percent * 100).rounded()) }
-    var percentSortKey: String { String(format: "%03d", percentInt) }
-    var percentDisplay: String { "\(percentInt)%" }
-}
