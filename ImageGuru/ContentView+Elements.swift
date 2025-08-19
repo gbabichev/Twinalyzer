@@ -196,8 +196,8 @@ extension ContentView {
     
     var bottomSplitView: some View {
         HSplitView {
-            // LEFT: table
-            Table(sortedRows, selection: $selectedRowID, sortOrder: $sortOrder) {
+            // LEFT: table - CHANGED to support multi-selection
+            Table(sortedRows, selection: $selectedRowIDs, sortOrder: $sortOrder) {
                 TableColumn("Reference", value: \.reference) { row in
                     Text(DisplayHelpers.shortDisplayPath(for: row.reference))
                         .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
@@ -254,8 +254,17 @@ extension ContentView {
                 }
             } else {
                 VStack(spacing: 8) {
-                    Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
-                        .foregroundStyle(.secondary)
+                    // CHANGED: Show selection count when multiple items selected
+                    if selectedRowIDs.count > 1 {
+                        Text("\(selectedRowIDs.count) matches selected")
+                            .foregroundStyle(.secondary)
+                        Text("Press Delete or use toolbar button to delete selected matches")
+                            .foregroundStyle(.secondary)
+                            .font(.footnote)
+                    } else {
+                        Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

@@ -8,8 +8,8 @@ struct ContentView: View {
     
     @State var showSettingsPopover = false
     
-    // Selection + sorting remains in the view for keyboard focus reasons
-    @State var selectedRowID: String? = nil
+    // CHANGED: Multi-selection support instead of single selection
+    @State var selectedRowIDs: Set<String> = []
     @State var sortOrder: [KeyPathComparator<TableRow>] = []
 
     var sortedRows: [TableRow] {
@@ -18,20 +18,18 @@ struct ContentView: View {
         return rows.sorted(using: sortOrder)
     }
 
+    // CHANGED: Use first selected row for preview
     var selectedRow: TableRow? {
-        sortedRows.first(where: { $0.id == selectedRowID })
+        guard let firstID = selectedRowIDs.first else { return nil }
+        return sortedRows.first(where: { $0.id == firstID })
+    }
+    
+    // CHANGED: Get selected MATCH file paths for deletion (not references)
+    var selectedMatchPaths: [String] {
+        let selectedRows = sortedRows.filter { selectedRowIDs.contains($0.id) }
+        return selectedRows.map { $0.similar } // Only delete the matched photos, not references
     }
 
-//    private var settingsPopoverContent: some View {
-//        return VStack(alignment: .leading, spacing: 16) {
-//            Text("Global Settings").font(.headline)
-//            Divider()
-//            controlsPanelPopover
-//        }
-//        .padding(20)
-//        .frame(width: 350)
-//    }
-    
     var body: some View {
         Group {
             if vm.isProcessing { processingView }
@@ -74,6 +72,23 @@ struct ContentView: View {
 
             // RIGHT: Primary actions.
             ToolbarItemGroup(placement: .primaryAction) {
+                // ADDED: Delete selected button
+                if !selectedRowIDs.isEmpty {
+                    Button {
+                        vm.deleteSelectedMatches(selectedMatches: selectedMatchPaths)
+                        selectedRowIDs.removeAll() // Clear selection after deletion
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "trash")
+                            Text("\(selectedRowIDs.count)")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                    }
+                    .keyboardShortcut(.delete, modifiers: [])
+                    .help("Delete \(selectedRowIDs.count) selected match\(selectedRowIDs.count == 1 ? "" : "es")")
+                }
+                
                 if vm.isProcessing {
                     Button {
                         vm.cancelAnalysis()
@@ -91,6 +106,22 @@ struct ContentView: View {
                     .disabled(vm.activeLeafFolders.isEmpty)
                 }
             }
+        }
+        // ADDED: Space key support for selection
+        .onKeyPress(.space) {
+            // Toggle selection of currently focused row
+            if let focusedRow = sortedRows.first(where: { selectedRowIDs.contains($0.id) }) {
+                // If we have a selection, space toggles the first selected item
+                if selectedRowIDs.contains(focusedRow.id) {
+                    selectedRowIDs.remove(focusedRow.id)
+                } else {
+                    selectedRowIDs.insert(focusedRow.id)
+                }
+            } else if let firstRow = sortedRows.first {
+                // If no selection, select the first row
+                selectedRowIDs.insert(firstRow.id)
+            }
+            return .handled
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             Task {
@@ -134,9 +165,8 @@ struct ContentView: View {
     func clearAll() {
         vm.clearAll()
         
-        // Clear table selections and sorting
-        selectedRowID = nil
-        //selectedRowIDs.removeAll()
+        // CHANGED: Clear multi-selection instead of single selection
+        selectedRowIDs.removeAll()
         sortOrder.removeAll()
     }
     
