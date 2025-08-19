@@ -89,26 +89,25 @@ extension ContentView {
     
     var selectedFoldersPanel: some View {
         VStack {
-            if !folderVM.sortedLeafFolders.isEmpty {
-                Table(folderVM.sortedLeafFolders, selection: $folderVM.selectedLeafIDs, sortOrder: $folderVM.leafSortOrder) {
-                    TableColumn("Folder Name", value: \.displayName) { leaf in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(leaf.url.lastPathComponent)
-                                .font(.system(size: 13, weight: .medium))
-                            Text(leaf.url.path)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .width(min: 200, ideal: 350)
-                    
-                    TableColumn("Actions") { leaf in
+            if !vm.discoveredLeafFolders.isEmpty {
+                List {
+                    ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
                         HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(leafURL.lastPathComponent)
+                                    .font(.system(size: 13, weight: .medium))
+                                
+                                Text(leafURL.path)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            
+                            Spacer()
+                            
                             if !vm.isProcessing {
                                 Button {
-                                    folderVM.removeLeaf(leaf)
+                                    vm.removeLeafFolder(leafURL)
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundColor(.red.opacity(0.7))
@@ -118,41 +117,12 @@ extension ContentView {
                                 .help("Remove this folder")
                             }
                         }
-                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 2)
                     }
-                    .width(60)
                 }
                 .frame(minHeight: 150, maxHeight: 300)
-                .contextMenu(forSelectionType: UUID.self) { selectedIDs in
-                    if !selectedIDs.isEmpty && !vm.isProcessing {
-                        Button("Remove Selected (\(selectedIDs.count))") {
-                            folderVM.removeLeafs(withIDs: selectedIDs)
-                        }
-                        
-                        Divider()
-                        
-                        Button("Select All") {
-                            folderVM.selectAllLeafs()
-                        }
-                        .disabled(!folderVM.canSelectAll)
-                        
-                        Button("Deselect All") {
-                            folderVM.deselectAllLeafs()
-                        }
-                        .disabled(!folderVM.canDeselectAll)
-                    } else if !vm.isProcessing {
-                        Button("Select All") {
-                            folderVM.selectAllLeafs()
-                        }
-                    }
-                }
-                .onDeleteCommand {
-                    if folderVM.canRemoveSelected {
-                        folderVM.removeSelectedLeafs()
-                    }
-                }
             } else {
-                Text("Select folders to scan.")
+                Text("Drop parent folders here to discover image folders.")
                     .foregroundStyle(.secondary)
             }
         }

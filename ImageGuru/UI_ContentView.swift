@@ -5,23 +5,13 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject var vm: AppViewModel
-    @StateObject var folderVM: FolderSelectionViewModel
     
     @State var showSettingsPopover = false
     
     // Selection + sorting remains in the view for keyboard focus reasons
     @State var selectedRowID: String? = nil
     @State var selectedRowIDs: Set<String> = []
-    @State var toggleVersion = 0
     @State var sortOrder: [KeyPathComparator<TableRow>] = []
-
-    // Custom initializer to properly connect the ViewModels
-    init() {
-        // We'll get the AppViewModel from the environment, but we need to create the folder VM
-        // This is a bit tricky with @EnvironmentObject, so we'll use a placeholder for now
-        // and properly initialize it in onAppear
-        _folderVM = StateObject(wrappedValue: FolderSelectionViewModel(appViewModel: nil))
-    }
 
     var sortedRows: [TableRow] {
         let rows = vm.flattenedResults
@@ -53,15 +43,11 @@ struct ContentView: View {
             else { mainSplitView }
         }
         .frame(minWidth: 700, minHeight: 500)
-        .onAppear {
-            // Initialize the folder VM with the actual app VM
-            folderVM.setAppViewModel(vm)
-        }
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
                 Button {
-                    folderVM.selectFoldersAndLeafs()
+                    selectFolders()
                 } label: {
                     Label("Open Folder", systemImage: "folder")
                 }
@@ -73,7 +59,7 @@ struct ContentView: View {
                     Label("Clear Folders", systemImage: "arrow.counterclockwise")
                 }
                 .keyboardShortcut("l", modifiers: [.command])
-                .disabled(vm.selectedFolderURLs.isEmpty)
+                .disabled(vm.selectedParentFolders.isEmpty)
                 .help("Clear all selected folders")
                 
                 Button {
@@ -107,7 +93,7 @@ struct ContentView: View {
                         Label("Analyze", systemImage: "wand.and.stars")
                     }
                     .keyboardShortcut("a", modifiers: [.command])
-                    .disabled(vm.selectedFolderURLs.isEmpty)
+                    .disabled(vm.activeLeafFolders.isEmpty)
                 }
             }
         }
@@ -129,7 +115,7 @@ struct ContentView: View {
                 
                 await MainActor.run {
                     if !droppedURLs.isEmpty {
-                        folderVM.addFolders(droppedURLs)
+                        vm.addParentFolders(droppedURLs)
                     }
                 }
             }
@@ -138,23 +124,25 @@ struct ContentView: View {
         }
     }
     
+    func selectFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.title = "Select Parent Folders to Scan"
+
+        if panel.runModal() == .OK {
+            vm.addParentFolders(panel.urls)
+        }
+    }
+    
     func clearAll() {
-        // Cancel any running analysis
-        vm.cancelAnalysis()
-        
-        // Clear folders via folderVM
-        folderVM.clearAllFolders()
-        
-        // Clear all analysis results (this clears matches, duplicate groups, etc.)
-        vm.comparisonResults.removeAll()
+        vm.clearAll()
         
         // Clear table selections and sorting
         selectedRowID = nil
         selectedRowIDs.removeAll()
         sortOrder.removeAll()
-        
-        // Reset toggle version (if this affects any UI state)
-        toggleVersion = 0
     }
     
     var mainSplitView: some View {
@@ -163,4 +151,8 @@ struct ContentView: View {
             bottomSplitView
         }
     }
+}
+
+struct LeafFolderRow {
+    let url: URL
 }

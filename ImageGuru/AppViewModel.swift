@@ -6,7 +6,8 @@ import ImageIO
 @MainActor
 final class AppViewModel: ObservableObject {
     // MARK: - Core State (only what we actually need to store)
-    @Published var selectedFolderURLs: [URL] = []
+    @Published var selectedParentFolders: [URL] = []
+    @Published var excludedLeafFolders: Set<URL> = []
     @Published var similarityThreshold: Double = 0.7
     @Published var selectedAnalysisMode: AnalysisMode = .deepFeature
     @Published var scanTopLevelOnly: Bool = false
@@ -17,11 +18,20 @@ final class AppViewModel: ObservableObject {
     // Simple cancellation
     private var analysisTask: Task<Void, Never>?
     
-    // MARK: - Computed Properties (replaces all the caching)
+    // MARK: - Computed Properties
+    
+    /// All leaf folders discovered from parents (consistent with analysis)
+    var discoveredLeafFolders: [URL] {
+        ImageAnalyzer.foldersToScan(from: selectedParentFolders)
+    }
+    
+    /// Leaf folders that will actually be scanned (after user exclusions)
+    var activeLeafFolders: [URL] {
+        discoveredLeafFolders.filter { !excludedLeafFolders.contains($0) }
+    }
     
     var foldersToScanLabel: String {
-        let leafs = FileSystemHelpers.findLeafFolders(from: selectedFolderURLs)
-        return leafs.map { $0.lastPathComponent }.joined(separator: "\n")
+        activeLeafFolders.map { $0.lastPathComponent }.joined(separator: "\n")
     }
     
     var flattenedResults: [TableRow] {
@@ -104,12 +114,20 @@ final class AppViewModel: ObservableObject {
     }
     
     var allFoldersBeingProcessed: [URL] {
-        let roots = selectedFolderURLs.map { $0.standardizedFileURL }
-        let all = Set(roots + ImageAnalyzer.recursiveSubdirectoriesExcludingRoots(under: roots))
-        return Array(all).sorted { $0.path < $1.path }
+        activeLeafFolders.sorted { $0.path < $1.path }
     }
     
     // MARK: - Actions
+    
+    func addParentFolders(_ urls: [URL]) {
+        let newParents = FileSystemHelpers.filterDirectories(from: urls)
+        let uniqueNewParents = FileSystemHelpers.uniqueURLs(from: newParents, existingURLs: selectedParentFolders)
+        selectedParentFolders.append(contentsOf: uniqueNewParents)
+    }
+    
+    func removeLeafFolder(_ leafURL: URL) {
+        excludedLeafFolders.insert(leafURL)
+    }
     
     func processImages(progress: @escaping @Sendable (Double) -> Void) {
         guard !isProcessing else { return }
@@ -118,7 +136,7 @@ final class AppViewModel: ObservableObject {
         isProcessing = true
         processingProgress = nil
 
-        let roots = selectedFolderURLs
+        let leafFolders = activeLeafFolders
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
 
@@ -137,7 +155,7 @@ final class AppViewModel: ObservableObject {
                 results = await withTaskCancellationHandler {
                     await withCheckedContinuation { continuation in
                         ImageAnalyzer.analyzeWithDeepFeatures(
-                            inFolders: roots,
+                            inFolders: leafFolders,
                             similarityThreshold: threshold,
                             topLevelOnly: topOnly,
                             progress: progressWrapper,
@@ -151,7 +169,7 @@ final class AppViewModel: ObservableObject {
                 results = await withTaskCancellationHandler {
                     await withCheckedContinuation { continuation in
                         ImageAnalyzer.analyzeWithPerceptualHash(
-                            inFolders: roots,
+                            inFolders: leafFolders,
                             similarityThreshold: threshold,
                             topLevelOnly: topOnly,
                             progress: progressWrapper,
@@ -213,7 +231,8 @@ final class AppViewModel: ObservableObject {
         cancelAnalysis()
         
         // Clear selected folders
-        selectedFolderURLs.removeAll()
+        selectedParentFolders.removeAll()
+        excludedLeafFolders.removeAll()
         
         // Clear all analysis results
         comparisonResults.removeAll()
