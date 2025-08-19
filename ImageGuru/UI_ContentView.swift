@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ImageIO
+import UniformTypeIdentifiers
 
 enum AnalysisMode: String, CaseIterable, Identifiable {
     case perceptualHash = "Perceptual Hash"
@@ -121,6 +122,15 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("o", modifiers: [.command])
                 
+                Button {
+                    clearAll()
+                } label: {
+                    Label("Clear Folders", systemImage: "arrow.counterclockwise")
+                }
+                .keyboardShortcut("l", modifiers: [.command])
+                .disabled(vm.selectedFolderURLs.isEmpty)
+                .help("Clear all selected folders")
+                
 //                Button {
 //                    clearAll()
 //                } label: {
@@ -141,20 +151,53 @@ struct ContentView: View {
             ToolbarItem(placement: .principal){
                 Spacer()
             }
+
             // RIGHT: Primary actions.
             ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    vm.processImages(progress: { _ in })
-                } label: {
-                    Label("Analyze", systemImage: "wand.and.stars")
+                if vm.isProcessing {
+                    Button {
+                        vm.cancelAnalysis()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark.circle")
+                    }
+                    .keyboardShortcut(.escape)
+                } else {
+                    Button {
+                        vm.processImages(progress: { _ in })
+                    } label: {
+                        Label("Analyze", systemImage: "wand.and.stars")
+                    }
+                    .keyboardShortcut("a", modifiers: [.command])
+                    .disabled(vm.selectedFolderURLs.isEmpty)
                 }
-                .keyboardShortcut("o", modifiers: [.command])
             }
 
         }
-
-        // Removed the onChange modifiers since foldersToScanLabel is now computed
-        // and recomputeDerived() is no longer needed
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            Task {
+                var droppedURLs: [URL] = []
+                
+                for provider in providers {
+                    do {
+                        let item = try await provider.loadItem(forTypeIdentifier: "public.file-url")
+                        if let data = item as? Data,
+                           let url = URL(dataRepresentation: data, relativeTo: nil) {
+                            droppedURLs.append(url)
+                        }
+                    } catch {
+                        // Silently ignore failed items
+                    }
+                }
+                
+                await MainActor.run {
+                    if !droppedURLs.isEmpty {
+                        addFolders(droppedURLs)
+                    }
+                }
+            }
+            
+            return true
+        }
     }
 
     
@@ -168,34 +211,72 @@ struct ContentView: View {
             // For now, let's just refresh the selection
             selectedLeafIDs.remove(leaf.id)
         }
+    
+    func removeLeafs(withIDs ids: Set<UUID>) {
+        selectedLeafIDs.subtract(ids)
+    }
+    
+    func removeSelectedLeafs() {
+        selectedLeafIDs.removeAll()
+    }
         
-        func removeLeafs(withIDs ids: Set<UUID>) {
-            selectedLeafIDs.subtract(ids)
+    func addFolders(_ urls: [URL]) {
+        // Same logic as selectFoldersAndLeafs but without the file picker
+        let newFolders = urls.filter { url in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
         }
         
-        func removeSelectedLeafs() {
-            selectedLeafIDs.removeAll()
-        }
+        let existingFolders = Set(vm.selectedFolderURLs.map { $0.standardizedFileURL })
         
-        // Update the selectFolders method to also select all discovered leafs
-        func selectFoldersAndLeafs() {
-            let panel = NSOpenPanel()
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = false
-            panel.allowsMultipleSelection = true
-            panel.title = "Select Parent Folders to Scan"
+        // Filter out duplicates and add new folders
+        let uniqueNewFolders = newFolders.filter { !existingFolders.contains($0.standardizedFileURL) }
+        vm.selectedFolderURLs.append(contentsOf: uniqueNewFolders)
+        
+        // Auto-select all discovered leaf folders (both existing and new)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            selectedLeafIDs = Set(sortedLeafFolders.map(\.id))
+        }
+    }
 
-            if panel.runModal() == .OK {
-                vm.selectedFolderURLs = panel.urls
-                
-                // Auto-select all discovered leaf folders
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    selectedLeafIDs = Set(sortedLeafFolders.map(\.id))
-                }
-            }
+    // Update selectFoldersAndLeafs to use the new helper:
+    func selectFoldersAndLeafs() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.title = "Select Parent Folders to Scan"
+
+        if panel.runModal() == .OK {
+            addFolders(panel.urls)
         }
+    }
     
+    func clearAllFolders() {
+        vm.selectedFolderURLs.removeAll()
+        selectedLeafIDs.removeAll()
+    }
     
+    func clearAll() {
+        // Cancel any running analysis
+        vm.cancelAnalysis()
+        
+        // Clear selected folders and leaf selections
+        vm.selectedFolderURLs.removeAll()
+        selectedLeafIDs.removeAll()
+        
+        // Clear all analysis results (this clears matches, duplicate groups, etc.)
+        vm.comparisonResults.removeAll()
+        
+        // Clear table selections and sorting
+        selectedRowID = nil
+        selectedRowIDs.removeAll()
+        sortOrder.removeAll()
+        leafSortOrder.removeAll()
+        
+        // Reset toggle version (if this affects any UI state)
+        toggleVersion = 0
+    }
     
     
 // ------

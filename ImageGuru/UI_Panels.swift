@@ -34,13 +34,6 @@ extension ContentView {
                     .frame(maxHeight: 200)
                 }
             }
-            
-            Button("Cancel") {
-                vm.cancelAnalysis()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(!vm.isProcessing)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -96,7 +89,6 @@ extension ContentView {
 
     
     var selectedFoldersPanel: some View {
-        
         VStack {
             if !sortedLeafFolders.isEmpty {
                 Table(sortedLeafFolders, selection: $selectedLeafIDs, sortOrder: $leafSortOrder) {
@@ -165,55 +157,8 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }
         }
-        
-        
-        
-        
-//        ScrollView {
-//            VStack(alignment: .leading, spacing: 20) {
-//                VStack(alignment: .leading, spacing: 8) {
-//                    Text("Folders to process (\(sortedLeafFolders.isEmpty ? "0" : "\(sortedLeafFolders.count)"))")
-//                        .font(.headline)
-//                    
-//                    if !selectedLeafIDs.isEmpty {
-//                        Text("(\(selectedLeafIDs.count) selected)")
-//                            .font(.caption)
-//                            .foregroundStyle(.secondary)
-//                    }
-//                    
-//
-//                }
-//                
-////                // Show parent folders that were selected
-////                if !vm.selectedFolderURLs.isEmpty {
-////                    VStack(alignment: .leading, spacing: 4) {
-////                        Text("Parent Folders Selected")
-////                            .font(.subheadline)
-////                            .foregroundStyle(.secondary)
-////                        ForEach(vm.selectedFolderURLs, id: \.self) { url in
-////                            Text("📁 \(url.path)")
-////                                .font(.footnote)
-////                                .foregroundStyle(.tertiary)
-////                        }
-////                    }
-////                }
-////                
-////                // Show results summary if available
-////                if !vm.flattenedResults.isEmpty {
-////                    VStack(alignment: .leading, spacing: 4) {
-////                        Text("Analysis Results")
-////                            .font(.subheadline)
-////                            .foregroundStyle(.secondary)
-////                        Text("Number of matches found: \(vm.flattenedResults.count)")
-////                            .font(.footnote)
-////                            .foregroundStyle(.secondary)
-////                    }
-////                }
-//            }
-//            .padding()
-//            .frame(maxWidth: .infinity, alignment: .topLeading)
-//        }
     }
+    
     
     
     var duplicateFoldersPanel: some View {
