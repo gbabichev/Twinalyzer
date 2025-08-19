@@ -4,11 +4,9 @@ import ImageIO
 import UniformTypeIdentifiers
 
 struct ContentView: View {
+    
     @EnvironmentObject var vm: AppViewModel
-    
     @State var showSettingsPopover = false
-    
-    // CHANGED: Separate table focus from deletion selection
     @State var tableSelection: Set<String> = [] // For table focus/navigation
     @State var deletionSelection: Set<String> = [] // For actual deletion checkboxes
     @State var sortOrder: [KeyPathComparator<TableRow>] = []
@@ -19,157 +17,9 @@ struct ContentView: View {
         return rows.sorted(using: sortOrder)
     }
     
-    // CHANGED: Use table focused row for preview
     var selectedRow: TableRow? {
         guard let firstID = tableSelection.first else { return nil }
         return sortedRows.first(where: { $0.id == firstID })
-    }
-    
-    // CHANGED: Get deletion selected MATCH file paths
-    var selectedMatchPaths: [String] {
-        let selectedRows = sortedRows.filter { deletionSelection.contains($0.id) }
-        return selectedRows.map { $0.similar } // Only delete the matched photos, not references
-    }
-        
-    var sidebarContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Selected Folders")
-                .font(.headline)
-                .padding(.horizontal)
-                .padding(.top)
-            
-            if !vm.discoveredLeafFolders.isEmpty {
-                List {
-                    ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(leafURL.lastPathComponent)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .lineLimit(1)
-                                
-                                Text(leafURL.path)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .textSelection(.enabled)
-                            }
-                            
-                            Spacer(minLength: 4)
-                            
-                            if !vm.isProcessing {
-                                Button {
-                                    vm.removeLeafFolder(leafURL)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.red.opacity(0.7))
-                                        .font(.system(size: 14))
-                                }
-                                .buttonStyle(.plain)
-                                .help("Remove this folder")
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-                .listStyle(.sidebar)
-            } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "folder.badge.plus")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.secondary)
-                    
-                    Text("Drop parent folders here to discover image folders.")
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    
-                    Button("Open Folder") {
-                        selectFolders()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .navigationTitle("Folders")
-        .frame(minWidth: 250, idealWidth: 300)
-    }
-    
-    func selectFolders() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true
-        panel.title = "Select Parent Folders to Scan"
-        
-        if panel.runModal() == .OK {
-            vm.addParentFolders(panel.urls)
-        }
-    }
-    
-    func clearAll() {
-        vm.clearAll()
-        
-        // CHANGED: Clear both selections
-        tableSelection.removeAll()
-        deletionSelection.removeAll()
-        sortOrder.removeAll()
-    }
-    
-    // SIMPLIFIED: Clean table view
-    var tableView: some View {
-        Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
-            TableColumn("Reference", value: \.reference) { row in
-                HStack(spacing: 8) {
-                    // Clickable deletion selection checkbox
-                    Button(action: {
-                        if deletionSelection.contains(row.id) {
-                            deletionSelection.remove(row.id)
-                        } else {
-                            deletionSelection.insert(row.id)
-                        }
-                    }) {
-                        Image(systemName: deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
-                            .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 20)
-                    
-                    Text(DisplayHelpers.shortDisplayPath(for: row.reference))
-                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .width(min: 200, ideal: 250)
-            
-            TableColumn("Match", value: \.similar) { row in
-                Text(DisplayHelpers.shortDisplayPath(for: row.similar))
-                    .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .width(min: 200, ideal: 250)
-            
-            TableColumn("Similarity", value: \.percentSortKey) { row in
-                Text(row.percentDisplay)
-                    .font(.system(.body, design: .monospaced))
-            }
-            .width(80)
-        }
-        .tableStyle(.automatic)
-        .navigationTitle("Results")
-    }
-    
-    // SIMPLIFIED: Clean detail split
-    var detailSplitView: some View {
-        VSplitView {
-            duplicatesFolderPanel
-                .frame(minHeight: 150, idealHeight: 200)
-            
-            previewPanel
-                .frame(minHeight: 200)
-        }
     }
     
     //MARK: - Main UI
@@ -188,10 +38,10 @@ struct ContentView: View {
                     detailSplitView
                         .navigationSplitViewColumnWidth(min: 200, ideal: 400)
                 }
-                .navigationSplitViewStyle(.prominentDetail) // FIXES toolbar timing issue
+                .navigationSplitViewStyle(.prominentDetail)
             }
         }
-        .frame(minWidth: 1000, minHeight: 600) // Standard minimum size
+        .frame(minWidth: 1000, minHeight: 600) 
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {

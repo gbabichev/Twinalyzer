@@ -80,8 +80,6 @@ extension ContentView {
         .padding(20)
     }
     
-    // Replace the duplicatesFolderPanel in ContentView+Elements.swift
-
     var duplicatesFolderPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -116,37 +114,27 @@ extension ContentView {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                GeometryReader { geometry in
-                    let isCompact = geometry.size.height < 200
-                    
-                    List {
-                        ForEach(Array(vm.folderClusters.enumerated()), id: \.offset) { i, cluster in
-                            Section {
-                                // Show all folders in the cluster as peers
-                                ForEach(cluster.indices, id: \.self) { j in
-                                    let folder = cluster[j]
-                                    
-                                    responsiveFolderRow(
-                                        folder: folder,
-                                        isCompact: isCompact,
-                                        isReference: false // No special reference styling for simple pairs
-                                    )
-                                }
-                            } header: {
-                                HStack {
-                                    Text("Group \(i + 1)")
-                                        .font(isCompact ? .caption2 : .caption)
-                                        .fontWeight(.medium)
-                                    Spacer()
-                                    Text("\(cluster.count) folder\(cluster.count == 1 ? "" : "s")")
-                                        .foregroundStyle(.secondary)
-                                        .font(isCompact ? .caption2 : .caption2)
-                                }
+                List {
+                    ForEach(Array(vm.folderClusters.enumerated()), id: \.offset) { i, cluster in
+                        Section {
+                            ForEach(cluster.indices, id: \.self) { j in
+                                let folder = cluster[j]
+                                folderRow(folder: folder)
+                            }
+                        } header: {
+                            HStack {
+                                Text("Group \(i + 1)")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Spacer()
+                                Text("\(cluster.count) folder\(cluster.count == 1 ? "" : "s")")
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption2)
                             }
                         }
                     }
-                    .listStyle(.sidebar)
                 }
+                .listStyle(.sidebar)
             }
             
             Spacer(minLength: 0)
@@ -154,27 +142,22 @@ extension ContentView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // Update the responsiveFolderRow function to show reference vs match
-    private func responsiveFolderRow(folder: String, isCompact: Bool, isReference: Bool = false) -> some View {
+    private func folderRow(folder: String) -> some View {
         Button(action: { vm.openFolderInFinder(folder) }) {
-            HStack(alignment: .center, spacing: isCompact ? 4 : 8) {
+            HStack(alignment: .center, spacing: 8) {
                 let url = URL(fileURLWithPath: folder)
                 let displayName = DisplayHelpers.formatFolderDisplayName(for: url)
                 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(displayName)
-                        .font(.system(size: isCompact ? 11 : 13, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    
-                    // Remove the full path subtitle for cleaner look
-                }
+                Text(displayName)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 
                 Spacer(minLength: 0)
                 
-                HStack(spacing: isCompact ? 3 : 6) {
-                    // Simple on-demand thumbnail (only in non-compact mode)
-                    if !isCompact, let imagePath = vm.representativeImageByFolder[folder] {
+                HStack(spacing: 6) {
+                    // Simple thumbnail
+                    if let imagePath = vm.representativeImageByFolder[folder] {
                         PreviewImage(path: imagePath, maxDimension: 24)
                             .frame(width: 24, height: 24)
                             .clipped()
@@ -187,31 +170,27 @@ extension ContentView {
                     
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("\(vm.crossFolderDuplicateCounts[folder, default: 0])")
-                            .font(.system(size: isCompact ? 11 : 14, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.primary)
-                        if !isCompact {
-                            Text("dupes")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("dupes")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            .padding(.vertical, isCompact ? 1 : 2)
+            .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
         .help("Folder: \(folder)")
     }
     
-    // IMPROVED: Much more responsive preview panel
     var previewPanel: some View {
         GeometryReader { geometry in
             VStack {
                 if let row = selectedRow, !vm.flattenedResults.isEmpty {
-                    adaptivePreviewLayout(for: row, in: geometry.size)
+                    previewLayout(for: row, in: geometry.size)
                 } else {
                     VStack(spacing: 8) {
-                        // CHANGED: Show selection count when multiple items selected
                         if deletionSelection.count > 1 {
                             Text("\(deletionSelection.count) matches selected")
                                 .foregroundStyle(.secondary)
@@ -229,63 +208,8 @@ extension ContentView {
         }
     }
     
-    // IMPROVED: Adaptive preview layout based on available space
     @ViewBuilder
-    private func adaptivePreviewLayout(for row: TableRow, in size: CGSize) -> some View {
-        let isWide = size.width > size.height * 1.2
-        let isVeryNarrow = size.width < 400
-        let isVeryShort = size.height < 300
-        
-        if isVeryNarrow || isVeryShort {
-            // Very constrained: Minimal layout
-            compactPreviewLayout(for: row, in: size)
-        } else if isWide {
-            // Wide layout: Side by side
-            horizontalPreviewLayout(for: row, in: size)
-        } else {
-            // Tall layout: Stacked vertically
-            verticalPreviewLayout(for: row, in: size)
-        }
-    }
-    
-    // IMPROVED: Compact preview for very small spaces
-    @ViewBuilder
-    private func compactPreviewLayout(for row: TableRow, in size: CGSize) -> some View {
-        VStack(spacing: 6) {
-            Text("Reference vs Match")
-                .font(.caption)
-                .fontWeight(.medium)
-            
-            HStack(spacing: 8) {
-                let imageSize = max(40, min(size.width / 2 - 20, size.height - 60, 120))
-                
-                VStack(spacing: 2) {
-                    PreviewImage(path: row.reference, maxDimension: imageSize)
-                        .frame(width: imageSize, height: imageSize)
-                        .clipped()
-                    
-                    Button("Del Ref") { vm.deleteFile(row.reference) }
-                        .font(.caption2)
-                        .controlSize(.mini)
-                }
-                
-                VStack(spacing: 2) {
-                    PreviewImage(path: row.similar, maxDimension: imageSize)
-                        .frame(width: imageSize, height: imageSize)
-                        .clipped()
-                    
-                    Button("Del Match") { vm.deleteFile(row.similar) }
-                        .font(.caption2)
-                        .controlSize(.mini)
-                }
-            }
-        }
-        .padding(8)
-    }
-    
-    // IMPROVED: Horizontal preview layout for wide spaces
-    @ViewBuilder
-    private func horizontalPreviewLayout(for row: TableRow, in size: CGSize) -> some View {
+    private func previewLayout(for row: TableRow, in size: CGSize) -> some View {
         let spacing: CGFloat = 20
         let inset: CGFloat = 16
         let twoColumnWidth = max(0, size.width - spacing - inset * 2)
@@ -293,6 +217,7 @@ extension ContentView {
         let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
         
         HStack(alignment: .top, spacing: spacing) {
+            // Reference side
             VStack(spacing: 8) {
                 Text("Reference")
                     .font(.subheadline)
@@ -316,9 +241,11 @@ extension ContentView {
                     vm.deleteFile(row.reference)
                 }
                 .controlSize(.small)
+                .disabled(vm.isProcessing)
             }
             .frame(maxWidth: max(100, singleColumn))
             
+            // Match side
             VStack(spacing: 8) {
                 Text("Match")
                     .font(.subheadline)
@@ -343,6 +270,7 @@ extension ContentView {
                     vm.deleteFile(row.similar)
                 }
                 .controlSize(.small)
+                .disabled(vm.isProcessing)
             }
             .frame(maxWidth: max(100, singleColumn))
         }
@@ -350,67 +278,127 @@ extension ContentView {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
     
-    // IMPROVED: Vertical preview layout for tall spaces
-    @ViewBuilder
-    private func verticalPreviewLayout(for row: TableRow, in size: CGSize) -> some View {
-        let spacing: CGFloat = 16
-        let inset: CGFloat = 12
-        let availableHeight = size.height - inset * 2 - spacing - 120 // Account for labels and buttons
-        let maxDim = max(60, min(size.width - inset * 2 - 40, availableHeight / 2, 300))
+    var selectedMatchPaths: [String] {
+        let selectedRows = sortedRows.filter { deletionSelection.contains($0.id) }
+        return selectedRows.map { $0.similar } // Only delete the matched photos, not references
+    }
         
-        VStack(spacing: spacing) {
-            // Reference section
-            VStack(spacing: 6) {
-                Text("Reference")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text(DisplayHelpers.shortDisplayPath(for: row.reference))
-                    .font(.caption)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                
-                PreviewImage(path: row.reference, maxDimension: maxDim)
-                    .frame(maxWidth: maxDim, maxHeight: maxDim)
-                    .clipped()
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-                
-                Button("Delete Reference") {
-                    vm.deleteFile(row.reference)
-                }
-                .controlSize(.small)
-            }
+    var sidebarContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Selected Folders")
+                .font(.headline)
+                .padding(.horizontal)
+                .padding(.top)
             
-            // Match section
-            VStack(spacing: 6) {
-                Text("Match")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text(DisplayHelpers.shortDisplayPath(for: row.similar))
-                    .font(.caption)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
-                
-                PreviewImage(path: row.similar, maxDimension: maxDim)
-                    .frame(maxWidth: maxDim, maxHeight: maxDim)
-                    .clipped()
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(DisplayHelpers.isCrossFolder(row) ? Color.red.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-                
-                Button("Delete Match") {
-                    vm.deleteFile(row.similar)
+            if !vm.discoveredLeafFolders.isEmpty {
+                List {
+                    ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(leafURL.lastPathComponent)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
+                                
+                                Text(leafURL.path)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                            }
+                            
+                            Spacer(minLength: 4)
+                            
+                            if !vm.isProcessing {
+                                Button {
+                                    vm.removeLeafFolder(leafURL)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red.opacity(0.7))
+                                        .font(.system(size: 14))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove this folder")
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
-                .controlSize(.small)
+                .listStyle(.sidebar)
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.secondary)
+                    
+                    Text("Drop parent folders here to discover image folders.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    
+                    Button("Open Folder") {
+                        selectFolders()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(inset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .navigationTitle("Folders")
+        .frame(minWidth: 250, idealWidth: 300)
     }
+    
+    var tableView: some View {
+        Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
+            TableColumn("Reference", value: \.reference) { row in
+                HStack(spacing: 8) {
+                    // Clickable deletion selection checkbox
+                    Button(action: {
+                        if deletionSelection.contains(row.id) {
+                            deletionSelection.remove(row.id)
+                        } else {
+                            deletionSelection.insert(row.id)
+                        }
+                    }) {
+                        Image(systemName: deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
+                            .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 20)
+                    
+                    Text(DisplayHelpers.shortDisplayPath(for: row.reference))
+                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .width(min: 200, ideal: 250)
+            
+            TableColumn("Match", value: \.similar) { row in
+                Text(DisplayHelpers.shortDisplayPath(for: row.similar))
+                    .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .width(min: 200, ideal: 250)
+            
+            TableColumn("Similarity", value: \.percentSortKey) { row in
+                Text(row.percentDisplay)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .width(80)
+        }
+        .tableStyle(.automatic)
+        .navigationTitle("Results")
+    }
+    
+    var detailSplitView: some View {
+        VSplitView {
+            duplicatesFolderPanel
+                .frame(minHeight: 150, idealHeight: 200)
+            
+            previewPanel
+                .frame(minHeight: 200)
+        }
+    }
+    
 }

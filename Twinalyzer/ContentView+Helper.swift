@@ -1,18 +1,8 @@
-//
-//  DisplayHelpers.swift
-//  ImageGuru
-//
-//  Created by George Babichev on 8/19/25.
-//
 
-
-//
-//  DisplayHelpers.swift
-//  ImageGuru
-//
-//  Utilities for formatting display strings and UI helpers
-//
-
+import SwiftUI
+import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 import Foundation
 
 public enum DisplayHelpers {
@@ -56,3 +46,28 @@ public enum DisplayHelpers {
         }
     }
 }
+
+extension ContentView {
+    func selectFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.title = "Select Parent Folders to Scan"
+        
+        if panel.runModal() == .OK {
+            vm.addParentFolders(panel.urls)
+        }
+    }
+
+    func clearAll() {
+        vm.clearAll()
+        
+        // CHANGED: Clear both selections
+        tableSelection.removeAll()
+        deletionSelection.removeAll()
+        sortOrder.removeAll()
+    }
+
+}
+
