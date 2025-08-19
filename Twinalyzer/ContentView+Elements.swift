@@ -1,10 +1,23 @@
+/*
+ 
+ ContentView+Elements.swift
+ Twinalyzer
+ 
+ George Babichev
+ 
+ */
+
 import SwiftUI
 import AppKit
 
 extension ContentView {
     
+    // MARK: - Processing View
+    /// Full-screen view displayed during image analysis
+    /// Shows progress bar, percentage, and list of folders being processed
     var processingView: some View {
         VStack(spacing: 16) {
+            // Progress indicator - determinate if progress available, indeterminate otherwise
             if let p = vm.processingProgress {
                 ProgressView(value: p).frame(width: 320)
                 Text(DisplayHelpers.formatProcessingProgress(p)).foregroundStyle(.secondary)
@@ -13,6 +26,7 @@ extension ContentView {
                 Text(DisplayHelpers.formatProcessingProgress(nil)).foregroundStyle(.secondary)
             }
             
+            // List of folders currently being analyzed
             VStack(alignment: .leading, spacing: 6) {
                 Text("Processing Folders...")
                     .font(.subheadline)
@@ -21,6 +35,7 @@ extension ContentView {
                     Text("No folders selected.")
                         .foregroundStyle(.secondary)
                 } else {
+                    // Scrollable list of folder paths with abbreviated display
                     ScrollView(showsIndicators: true) {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(vm.allFoldersBeingProcessed, id: \.self) { url in
@@ -38,16 +53,21 @@ extension ContentView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
+    // MARK: - Settings Panel
+    /// Popover containing analysis configuration options
+    /// Includes scan depth, analysis method, and similarity threshold controls
     var controlsPanelPopover: some View {
         VStack(alignment: .leading, spacing: 16) {
             
             Text("Settings").font(.headline)
             Divider()
             
+            // Scan depth control: top-level only vs recursive scanning
             Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
             
             Divider()
             
+            // Analysis method selection with info tooltip
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Analysis Method")
@@ -61,6 +81,7 @@ extension ContentView {
                     .help("Enhanced Scan: AI-based analysis that can detect similar content even with different crops or lighting.\n\nBasic Scan: Fast comparison using image fingerprints, good for exact duplicates.")
                 }
                 
+                // Segmented control for Deep Feature vs Perceptual Hash
                 Picker("", selection: $vm.selectedAnalysisMode) {
                     ForEach(AnalysisMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
@@ -69,6 +90,7 @@ extension ContentView {
                 .pickerStyle(.segmented)
             }
             
+            // Similarity threshold slider with live percentage display
             VStack {
                 Text("Similarity Threshold")
                 Slider(value: $vm.similarityThreshold, in: 0.45...1.0, step: 0.025)
@@ -80,8 +102,12 @@ extension ContentView {
         .padding(20)
     }
     
+    // MARK: - Cross-Folder Duplicates Panel
+    /// Top section of detail view showing folder relationships
+    /// Groups folders that contain duplicate images across different directories
     var duplicatesFolderPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Header with count of folder relationships
             HStack {
                 Text("Cross-Folder Duplicates")
                     .font(.headline)
@@ -96,6 +122,7 @@ extension ContentView {
             .padding(.horizontal, 12)
             .padding(.top, 8)
             
+            // Empty state when no cross-folder duplicates found
             if vm.folderClusters.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "folder.badge.questionmark")
@@ -114,6 +141,7 @@ extension ContentView {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // List of folder groups that share duplicate images
                 List {
                     ForEach(Array(vm.folderClusters.enumerated()), id: \.offset) { i, cluster in
                         Section {
@@ -142,12 +170,16 @@ extension ContentView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Individual folder row in the cross-folder duplicates list
+    /// Shows folder name, thumbnail, and duplicate count
+    /// Clickable to open folder in Finder
     private func folderRow(folder: String) -> some View {
         Button(action: { vm.openFolderInFinder(folder) }) {
             HStack(alignment: .center, spacing: 8) {
                 let url = URL(fileURLWithPath: folder)
                 let displayName = DisplayHelpers.formatFolderDisplayName(for: url)
                 
+                // Folder name with middle truncation for long paths
                 Text(displayName)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
@@ -156,7 +188,7 @@ extension ContentView {
                 Spacer(minLength: 0)
                 
                 HStack(spacing: 6) {
-                    // Simple thumbnail
+                    // Representative thumbnail from this folder
                     if let imagePath = vm.representativeImageByFolder[folder] {
                         PreviewImage(path: imagePath, maxDimension: 24)
                             .frame(width: 24, height: 24)
@@ -168,6 +200,7 @@ extension ContentView {
                             )
                     }
                     
+                    // Duplicate count badge
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("\(vm.crossFolderDuplicateCounts[folder, default: 0])")
                             .font(.system(size: 14, weight: .semibold))
@@ -184,12 +217,17 @@ extension ContentView {
         .help("Folder: \(folder)")
     }
     
+    // MARK: - Preview Panel
+    /// Bottom section of detail view showing side-by-side image comparison
+    /// Displays reference and match images with delete buttons
     var previewPanel: some View {
         GeometryReader { geometry in
             VStack {
+                // Show preview if a row is selected and results exist
                 if let row = selectedRow, !vm.flattenedResults.isEmpty {
                     previewLayout(for: row, in: geometry.size)
                 } else {
+                    // Empty state messaging based on current selection state
                     VStack(spacing: 8) {
                         if deletionSelection.count > 1 {
                             Text("\(deletionSelection.count) matches selected")
@@ -208,8 +246,12 @@ extension ContentView {
         }
     }
     
+    /// Side-by-side layout for comparing reference and match images
+    /// Calculates optimal image sizes based on available space
+    /// Includes delete buttons for individual image removal
     @ViewBuilder
     private func previewLayout(for row: TableRow, in size: CGSize) -> some View {
+        // Calculate layout dimensions based on available space
         let spacing: CGFloat = 20
         let inset: CGFloat = 16
         let twoColumnWidth = max(0, size.width - spacing - inset * 2)
@@ -217,18 +259,20 @@ extension ContentView {
         let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
         
         HStack(alignment: .top, spacing: spacing) {
-            // Reference side
+            // Left side: Reference image
             VStack(spacing: 8) {
                 Text("Reference")
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
+                // Shortened path display
                 Text(DisplayHelpers.shortDisplayPath(for: row.reference))
                     .font(.caption)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .multilineTextAlignment(.center)
                 
+                // Reference image with border
                 PreviewImage(path: row.reference, maxDimension: maxDim)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
                     .clipped()
@@ -237,6 +281,7 @@ extension ContentView {
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
                 
+                // Delete reference button
                 Button("Delete Reference") {
                     vm.deleteFile(row.reference)
                 }
@@ -245,12 +290,13 @@ extension ContentView {
             }
             .frame(maxWidth: max(100, singleColumn))
             
-            // Match side
+            // Right side: Match image
             VStack(spacing: 8) {
                 Text("Match")
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
+                // Match path with cross-folder highlighting
                 Text(DisplayHelpers.shortDisplayPath(for: row.similar))
                     .font(.caption)
                     .lineLimit(2)
@@ -258,6 +304,7 @@ extension ContentView {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
                 
+                // Match image with conditional red border for cross-folder duplicates
                 PreviewImage(path: row.similar, maxDimension: maxDim)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
                     .clipped()
@@ -266,6 +313,7 @@ extension ContentView {
                             .stroke(DisplayHelpers.isCrossFolder(row) ? Color.red.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: 1)
                     )
                 
+                // Delete match button
                 Button("Delete Match") {
                     vm.deleteFile(row.similar)
                 }
@@ -277,12 +325,10 @@ extension ContentView {
         .padding(inset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
-    
-    var selectedMatchPaths: [String] {
-        let selectedRows = sortedRows.filter { deletionSelection.contains($0.id) }
-        return selectedRows.map { $0.similar } // Only delete the matched photos, not references
-    }
-        
+
+    // MARK: - Sidebar Content
+    /// Left panel showing selected folders and their management
+    /// Displays discovered leaf folders with removal options
     var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Selected Folders")
@@ -290,10 +336,12 @@ extension ContentView {
                 .padding(.horizontal)
                 .padding(.top)
             
+            // Show folders if any have been discovered
             if !vm.discoveredLeafFolders.isEmpty {
                 List {
                     ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
                         HStack {
+                            // Folder info: name and full path
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(leafURL.lastPathComponent)
                                     .font(.system(size: 13, weight: .medium))
@@ -309,6 +357,7 @@ extension ContentView {
                             
                             Spacer(minLength: 4)
                             
+                            // Remove folder button (hidden during processing)
                             if !vm.isProcessing {
                                 Button {
                                     vm.removeLeafFolder(leafURL)
@@ -326,6 +375,7 @@ extension ContentView {
                 }
                 .listStyle(.sidebar)
             } else {
+                // Empty state: prompt user to add folders
                 VStack(spacing: 12) {
                     Image(systemName: "folder.badge.plus")
                         .font(.system(size: 32))
@@ -347,8 +397,12 @@ extension ContentView {
         .frame(minWidth: 250, idealWidth: 300)
     }
     
+    // MARK: - Results Table
+    /// Center panel displaying comparison results in sortable table format
+    /// Includes checkboxes for deletion selection and similarity percentages
     var tableView: some View {
         Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
+            // Reference column with deletion checkbox
             TableColumn("Reference", value: \.reference) { row in
                 HStack(spacing: 8) {
                     // Clickable deletion selection checkbox
@@ -365,6 +419,7 @@ extension ContentView {
                     .buttonStyle(.plain)
                     .frame(width: 20)
                     
+                    // Reference file path with cross-folder highlighting
                     Text(DisplayHelpers.shortDisplayPath(for: row.reference))
                         .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
                         .lineLimit(1)
@@ -373,6 +428,7 @@ extension ContentView {
             }
             .width(min: 200, ideal: 250)
             
+            // Match column showing similar image path
             TableColumn("Match", value: \.similar) { row in
                 Text(DisplayHelpers.shortDisplayPath(for: row.similar))
                     .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
@@ -381,6 +437,7 @@ extension ContentView {
             }
             .width(min: 200, ideal: 250)
             
+            // Similarity percentage column with monospaced font for alignment
             TableColumn("Similarity", value: \.percentSortKey) { row in
                 Text(row.percentDisplay)
                     .font(.system(.body, design: .monospaced))
@@ -391,6 +448,8 @@ extension ContentView {
         .navigationTitle("Results")
     }
     
+    // MARK: - Detail Split View
+    /// Right panel with vertical split: cross-folder duplicates on top, preview on bottom
     var detailSplitView: some View {
         VSplitView {
             duplicatesFolderPanel

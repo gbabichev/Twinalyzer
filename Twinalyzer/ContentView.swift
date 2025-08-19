@@ -1,3 +1,12 @@
+/*
+ 
+ ContentView.swift
+ Twinalyzer
+ 
+ George Babichev
+ 
+ */
+
 import SwiftUI
 import AppKit
 import ImageIO
@@ -7,16 +16,28 @@ struct ContentView: View {
     
     @EnvironmentObject var vm: AppViewModel
     @State var showSettingsPopover = false
-    @State var tableSelection: Set<String> = [] // For table focus/navigation
-    @State var deletionSelection: Set<String> = [] // For actual deletion checkboxes
-    @State var sortOrder: [KeyPathComparator<TableRow>] = []
     
+    // MARK: - Selection State Management
+    // The app maintains two separate selection systems:
+    // 1. tableSelection: Tracks which rows are focused/highlighted in the table (for navigation and preview)
+    // 2. deletionSelection: Tracks which rows are marked for deletion via checkboxes (for batch operations)
+    @State var tableSelection: Set<String> = [] // For table focus/navigation and preview
+    @State var deletionSelection: Set<String> = [] // For actual deletion checkboxes and bulk operations
+    
+    // MARK: - Table Sorting
+    @State var sortOrder: [KeyPathComparator<TableRow>] = [] // User-configurable sort order for table columns
+    
+    /// Returns the table rows sorted according to user preferences
+    /// If no sort order is specified, returns rows in their natural order from the view model
     var sortedRows: [TableRow] {
         let rows = vm.flattenedResults
         guard !sortOrder.isEmpty else { return rows }
         return rows.sorted(using: sortOrder)
     }
     
+    /// Returns the currently focused/selected row for preview display
+    /// Uses the first item from tableSelection (table focus) to determine which row to show in the detail view
+    /// Returns nil if no row is selected or if the selection doesn't match any existing row
     var selectedRow: TableRow? {
         guard let firstID = tableSelection.first else { return nil }
         return sortedRows.first(where: { $0.id == firstID })
@@ -41,7 +62,7 @@ struct ContentView: View {
                 .navigationSplitViewStyle(.prominentDetail)
             }
         }
-        .frame(minWidth: 1000, minHeight: 600) 
+        .frame(minWidth: 1000, minHeight: 600)
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
@@ -80,7 +101,7 @@ struct ContentView: View {
 
             // RIGHT: Primary actions.
             ToolbarItemGroup(placement: .primaryAction) {
-                // ADDED: Clear selection button
+                // Clear selection button - only shows when items are selected for deletion
                 if !deletionSelection.isEmpty {
                     Button {
                         deletionSelection.removeAll()
@@ -95,7 +116,7 @@ struct ContentView: View {
                     .disabled(vm.isProcessing) // Disable during processing
                 }
                 
-                // ADDED: Delete selected button
+                // Delete selected button - shows count and allows batch deletion
                 if !deletionSelection.isEmpty {
                     Button {
                         vm.deleteSelectedMatches(selectedMatches: selectedMatchPaths)
@@ -113,6 +134,7 @@ struct ContentView: View {
                     .disabled(vm.isProcessing) // Disable during processing
                 }
                 
+                // Processing state: Show cancel button during analysis
                 if vm.isProcessing {
                     Button {
                         vm.cancelAnalysis()
@@ -121,8 +143,10 @@ struct ContentView: View {
                     }
                     .keyboardShortcut(.escape)
                 } else {
+                    // Ready state: Show analyze button when ready to process
                     Button {
-                        // FIXED: Clear selections when starting new analysis
+                        // Clear both selection states when starting new analysis
+                        // This prevents stale selections from previous results
                         tableSelection.removeAll()
                         deletionSelection.removeAll()
                         vm.processImages(progress: { _ in })
@@ -134,10 +158,12 @@ struct ContentView: View {
                 }
             }
         }
+        // MARK: - Keyboard Shortcuts
+        // Space bar toggles deletion checkbox for selected rows
         .onKeyPress(.space) {
             guard !tableSelection.isEmpty else { return .handled }
             
-            // If multiple rows are table-selected, toggle all of them
+            // Handle multiple row selection: toggle all selected rows consistently
             if tableSelection.count > 1 {
                 // Check if all selected rows are already checked for deletion
                 let allChecked = tableSelection.allSatisfy { deletionSelection.contains($0) }
@@ -154,7 +180,7 @@ struct ContentView: View {
                     }
                 }
             } else {
-                // Single row - toggle as before
+                // Single row selection: simple toggle
                 guard let focusedID = tableSelection.first else { return .handled }
                 
                 if deletionSelection.contains(focusedID) {
@@ -165,6 +191,8 @@ struct ContentView: View {
             }
             return .handled
         }
+        // MARK: - Drag and Drop Support
+        // Allow users to drag folders directly onto the app window
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             Task {
                 var droppedURLs: [URL] = []
@@ -177,7 +205,7 @@ struct ContentView: View {
                             droppedURLs.append(url)
                         }
                     } catch {
-                        // Silently ignore failed items
+                        // Silently ignore failed items - don't interrupt the drag operation
                     }
                 }
                 

@@ -1,9 +1,11 @@
-//
-//  ImageGuruApp.swift
-//  ImageGuru
-//
-//  Created by George Babichev on 8/6/25.
-//
+/*
+ 
+ TwinalyzerApp.swift
+ Twinalyzer
+ 
+ George Babichev
+ 
+ */
 
 import SwiftUI
 
