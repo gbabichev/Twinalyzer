@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct ImageGuruApp: App {
+struct TwinalyzerApp: App {
     @StateObject private var appViewModel = AppViewModel()
     
     var body: some Scene {
@@ -38,7 +38,6 @@ struct ActionsCommands: Commands {
                     viewModel.processImages(progress: { _ in })
                 }
                 .keyboardShortcut("p", modifiers: [.command])
-                //.disabled(viewModel.selectedFolderURLs.isEmpty)
             }
             
             Divider()
@@ -47,7 +46,6 @@ struct ActionsCommands: Commands {
                 viewModel.clearAll()
             }
             .keyboardShortcut("l", modifiers: [.command])
-           //.disabled(viewModel.selectedFolderURLs.isEmpty)
         }
     }
 }
