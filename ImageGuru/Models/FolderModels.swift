@@ -9,18 +9,6 @@ import Foundation
 
 // MARK: - Folder Selection Models
 
-public struct FolderRow: Identifiable {
-    public let id: Int
-    public let index: Int
-    public let url: URL
-    
-    public init(index: Int, url: URL) {
-        self.id = index
-        self.index = index
-        self.url = url
-    }
-}
-
 public struct LeafFolder: Identifiable, Comparable, Sendable {
     public let id = UUID()
     public let url: URL

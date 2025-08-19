@@ -24,22 +24,7 @@ public final class ImageCache {
 // MARK: - Image Processing Utilities
 
 public enum ImageProcessingUtilities {
-    
-    /// Creates a downsampled NSImage from a file URL
-    public nonisolated static func downsampledNSImage(at url: URL, targetMaxDimension: CGFloat) -> NSImage? {
-        let options: [NSString: Any] = [
-            kCGImageSourceShouldCache: false,
-            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: Int(targetMaxDimension)
-        ]
 
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let cgThumb = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
-        else { return nil }
-
-        return NSImage(cgImage: cgThumb, size: NSSize(width: cgThumb.width, height: cgThumb.height))
-    }
     
     /// Creates a downsampled CGImage from a file URL
     public nonisolated static func downsampledCGImage(at url: URL, targetMaxDimension: CGFloat) -> CGImage? {

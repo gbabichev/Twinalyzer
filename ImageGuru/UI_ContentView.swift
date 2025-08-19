@@ -56,7 +56,6 @@ struct ContentView: View {
         .onAppear {
             // Initialize the folder VM with the actual app VM
             folderVM.setAppViewModel(vm)
-            installSpacebarToggle()
         }
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
