@@ -42,7 +42,8 @@ struct LeafFolder: Identifiable, Comparable, Sendable {
 
 struct ContentView: View {
 
-    @StateObject var vm = AppViewModel()
+    @EnvironmentObject var vm: AppViewModel
+
 
     @State var showSettingsPopover = false
     

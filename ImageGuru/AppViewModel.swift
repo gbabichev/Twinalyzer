@@ -235,6 +235,18 @@ final class AppViewModel: ObservableObject {
         urls.forEach(recurse)
         return leafFolders
     }
+    
+    func clearAll() {
+        // Cancel any running analysis
+        cancelAnalysis()
+        
+        // Clear selected folders
+        selectedFolderURLs.removeAll()
+        
+        // Clear all analysis results
+        comparisonResults.removeAll()
+    }
+    
 }
 
 // Background-safe thumbnailing
