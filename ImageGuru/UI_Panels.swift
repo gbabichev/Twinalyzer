@@ -48,7 +48,7 @@ extension ContentView {
     var topSplitView: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
-                controlsPanel
+                selectedFoldersPanel
                     .frame(width: 520)
                 Divider()
                 duplicateFoldersPanel
@@ -59,20 +59,9 @@ extension ContentView {
         .frame(minHeight: 320)
     }
 
-    var controlsPanel: some View {
+    var controlsPanelPopover: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 12) {
-                    Button("Select Folders") { selectFolders() }
-                        .frame(maxWidth: .infinity, minHeight: 44)
-
-                    Button("Analyze") {
-                        vm.processImages(progress: { _ in })  // Simplified progress callback
-                    }
-                    .disabled(vm.selectedFolderURLs.isEmpty)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .buttonStyle(.borderedProminent)
-                }
 
                 Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
 
@@ -99,33 +88,134 @@ extension ContentView {
                     }
                     .tint(.red)
                 }
-
-                Divider()
-
-                if vm.flattenedResults.isEmpty {  // Changed from vm.cachedFlattened
-                    Text("No matches yet.").foregroundStyle(.secondary)
-                } else {
-                    Text("Number of matches found: \(vm.flattenedResults.count)")  // Changed from vm.cachedFlattened
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                if vm.selectedFolderURLs.isEmpty {
-                    Text("No folders selected.").foregroundStyle(.secondary)
-                } else {
-                    Text("Selected Folders:\n" + vm.foldersToScanLabel)  // Now computed property
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer()
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
+    
+    var selectedFoldersPanel: some View {
+        
+        VStack {
+            if !sortedLeafFolders.isEmpty {
+                Table(sortedLeafFolders, selection: $selectedLeafIDs, sortOrder: $leafSortOrder) {
+                    TableColumn("Folder Name", value: \.displayName) { leaf in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(leaf.url.lastPathComponent)
+                                .font(.system(size: 13, weight: .medium))
+                            Text(leaf.url.path)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .width(min: 200, ideal: 350)
+                    
+                    TableColumn("Actions") { leaf in
+                        HStack {
+                            if !vm.isProcessing {
+                                Button {
+                                    removeLeaf(leaf)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red.opacity(0.7))
+                                        .font(.system(size: 14))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove this folder")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .width(60)
+                }
+                .frame(minHeight: 150, maxHeight: 300)
+                .contextMenu(forSelectionType: UUID.self) { selectedIDs in
+                    if !selectedIDs.isEmpty && !vm.isProcessing {
+                        Button("Remove Selected (\(selectedIDs.count))") {
+                            removeLeafs(withIDs: selectedIDs)
+                        }
+                        
+                        Divider()
+                        
+                        Button("Select All") {
+                            selectedLeafIDs = Set(sortedLeafFolders.map(\.id))
+                        }
+                        .disabled(selectedLeafIDs.count == sortedLeafFolders.count)
+                        
+                        Button("Deselect All") {
+                            selectedLeafIDs.removeAll()
+                        }
+                        .disabled(selectedLeafIDs.isEmpty)
+                    } else if !vm.isProcessing {
+                        Button("Select All") {
+                            selectedLeafIDs = Set(sortedLeafFolders.map(\.id))
+                        }
+                    }
+                }
+                .onDeleteCommand {
+                    if !selectedLeafIDs.isEmpty && !vm.isProcessing {
+                        removeSelectedLeafs()
+                    }
+                }
+            } else {
+                Text("Select folders to scan.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        
+        
+        
+        
+//        ScrollView {
+//            VStack(alignment: .leading, spacing: 20) {
+//                VStack(alignment: .leading, spacing: 8) {
+//                    Text("Folders to process (\(sortedLeafFolders.isEmpty ? "0" : "\(sortedLeafFolders.count)"))")
+//                        .font(.headline)
+//                    
+//                    if !selectedLeafIDs.isEmpty {
+//                        Text("(\(selectedLeafIDs.count) selected)")
+//                            .font(.caption)
+//                            .foregroundStyle(.secondary)
+//                    }
+//                    
+//
+//                }
+//                
+////                // Show parent folders that were selected
+////                if !vm.selectedFolderURLs.isEmpty {
+////                    VStack(alignment: .leading, spacing: 4) {
+////                        Text("Parent Folders Selected")
+////                            .font(.subheadline)
+////                            .foregroundStyle(.secondary)
+////                        ForEach(vm.selectedFolderURLs, id: \.self) { url in
+////                            Text("📁 \(url.path)")
+////                                .font(.footnote)
+////                                .foregroundStyle(.tertiary)
+////                        }
+////                    }
+////                }
+////                
+////                // Show results summary if available
+////                if !vm.flattenedResults.isEmpty {
+////                    VStack(alignment: .leading, spacing: 4) {
+////                        Text("Analysis Results")
+////                            .font(.subheadline)
+////                            .foregroundStyle(.secondary)
+////                        Text("Number of matches found: \(vm.flattenedResults.count)")
+////                            .font(.footnote)
+////                            .foregroundStyle(.secondary)
+////                    }
+////                }
+//            }
+//            .padding()
+//            .frame(maxWidth: .infinity, alignment: .topLeading)
+//        }
+    }
+    
+    
     var duplicateFoldersPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Duplicate Folder Groups").font(.headline)

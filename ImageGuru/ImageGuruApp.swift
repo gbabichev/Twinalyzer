@@ -13,5 +13,6 @@ struct ImageGuruApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowStyle(.hiddenTitleBar)
     }
 }
