@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 extension ContentView {
-
+    
     var processingView: some View {
         VStack(spacing: 16) {
             if let p = vm.processingProgress {
@@ -37,7 +37,7 @@ extension ContentView {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-
+    
     var topSplitView: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -51,13 +51,13 @@ extension ContentView {
         }
         .frame(minHeight: 320)
     }
-
+    
     var controlsPanelPopover: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-
+                
                 Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
-
+                
                 Picker("", selection: $vm.selectedAnalysisMode) {
                     ForEach(AnalysisMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
@@ -72,7 +72,7 @@ extension ContentView {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-
+                
                 if !selectedMatches.isEmpty {
                     Button(role: .destructive) {
                         vm.deleteSelectedMatches(selectedMatches: selectedMatches)
@@ -86,7 +86,7 @@ extension ContentView {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
-
+    
     
     var selectedFoldersPanel: some View {
         VStack {
@@ -157,6 +157,7 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
     
     
@@ -164,7 +165,7 @@ extension ContentView {
     var duplicateFoldersPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Duplicate Folder Groups").font(.headline)
-
+            
             if vm.folderClusters.isEmpty {  // Changed from vm.cachedClusters
                 Text("No cross-folder duplicate relationships found.")
                     .foregroundStyle(.secondary)
@@ -181,9 +182,9 @@ extension ContentView {
                                         Text(parent.isEmpty ? name : "\(parent)/\(name)")
                                             .lineLimit(1)
                                             .truncationMode(.middle)
-
+                                        
                                         Spacer(minLength: 12)
-
+                                        
                                         HStack(spacing: 8) {
                                             // Simple on-demand thumbnail
                                             if let imagePath = vm.representativeImageByFolder[folder] {
@@ -220,7 +221,7 @@ extension ContentView {
             Spacer()
         }
     }
-
+    
     var bottomSplitView: some View {
         HSplitView {
             // LEFT: table
@@ -229,26 +230,26 @@ extension ContentView {
                     Text(shortDisplayPath(for: row.reference))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
-
+                
                 TableColumn("Match", value: \.similar) { row in
                     Text(shortDisplayPath(for: row.similar))
                         .foregroundStyle(isCrossFolder(row) ? .red : .primary)
                 }
-
+                
                 TableColumn("Percent", value: \.percentSortKey) { row in
                     Text(row.percentDisplay)
                 }
                 .width(70)
             }
             .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
-
+            
             // RIGHT: preview
             previewPanel
                 .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
         }
     }
-
+    
     var previewPanel: some View {
         VStack {
             if let row = selectedRow, !vm.flattenedResults.isEmpty {  // Changed from vm.cachedFlattened
@@ -258,7 +259,7 @@ extension ContentView {
                     let twoColumnWidth = max(0, geo.size.width - spacing - inset * 2)
                     let singleColumn = twoColumnWidth / 2
                     let maxDim = min(singleColumn, geo.size.height - 120)
-
+                    
                     HStack(alignment: .top, spacing: spacing) {
                         VStack(spacing: 8) {
                             Text("Reference")
@@ -277,7 +278,7 @@ extension ContentView {
                         }
                     }
                     .padding(inset)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
             } else {
                 VStack(spacing: 8) {
@@ -288,6 +289,9 @@ extension ContentView {
             }
         }
     }
+    
+    
+    
 }
 
 extension TableRow {
