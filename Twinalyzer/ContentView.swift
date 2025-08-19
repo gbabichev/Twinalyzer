@@ -119,6 +119,9 @@ struct ContentView: View {
                     .keyboardShortcut(.escape)
                 } else {
                     Button {
+                        // FIXED: Clear selections when starting new analysis
+                        tableSelection.removeAll()
+                        deletionSelection.removeAll()
                         vm.processImages(progress: { _ in })
                     } label: {
                         Label("Analyze", systemImage: "wand.and.stars")
