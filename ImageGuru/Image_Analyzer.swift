@@ -254,39 +254,6 @@ public enum ImageAnalyzer {
     }
 
     // MARK: Public API (pHash table pairs) - kept for compatibility
-    public nonisolated static func analyzePerceptualHash(
-        roots: [URL],
-        scanTopLevelOnly: Bool,
-        maxDist: Int = 5,
-        progress: (@Sendable (Double) -> Void)? = nil
-    ) -> [TableRow] {
-        
-        let subdirs = foldersToScan(from: roots)
-        
-        if scanTopLevelOnly {
-            let totalImages = subdirs.reduce(0) { $0 + topLevelImageFiles(in: $1).count }
-            var processed = 0
-            var rows: [TableRow] = []
-            for dir in subdirs {
-                let files = topLevelImageFiles(in: dir)
-                var localDone = 0
-                let pairs = hashAndCompare(files: files, maxDist: maxDist)
-                localDone = files.count
-                processed += localDone
-                updateProgress(processed, totalImages, progress)
-                rows.append(contentsOf: pairs)
-            }
-            rows.sort { $0.percent > $1.percent }
-            updateProgress(totalImages, totalImages, progress)
-            return rows
-        } else {
-            var allFiles: [URL] = []
-            for d in subdirs { allFiles.append(contentsOf: allImageFiles(in: d)) }
-            let rows = hashAndCompare(files: allFiles, maxDist: maxDist).sorted { $0.percent > $1.percent }
-            updateProgress(allFiles.count, allFiles.count, progress)
-            return rows
-        }
-    }
 
     /// Cluster Vision observations at a given threshold. Must be called on MainActor.
     @MainActor

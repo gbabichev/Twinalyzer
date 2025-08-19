@@ -53,38 +53,45 @@ extension ContentView {
     }
     
     var controlsPanelPopover: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                
-                Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
+        VStack(alignment: .leading, spacing: 16) {
+            
+            Text("Settings").font(.headline)
+            Divider()
+            
+            Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
+            
+            Divider()
+            
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Analysis Method")
+                        .font(.subheadline)
+                    Button(action: {}) {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Enhanced Scan: AI-based analysis that can detect similar content even with different crops or lighting.\n\nBasic Scan: Fast comparison using image fingerprints, good for exact duplicates.")
+                }
                 
                 Picker("", selection: $vm.selectedAnalysisMode) {
                     ForEach(AnalysisMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
                 }
-                .pickerStyle(.inline)
-                
-                VStack {
-                    Text("Similarity Threshold")
-                    Slider(value: $vm.similarityThreshold, in: 0.45...1.0, step: 0.025)
-                    Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                
-                if !selectedMatches.isEmpty {
-                    Button(role: .destructive) {
-                        vm.deleteSelectedMatches(selectedMatches: selectedMatches)
-                    } label: {
-                        Label("Delete Selected Matches (\(selectedMatches.count))", systemImage: "trash")
-                    }
-                    .tint(.red)
-                }
+                .pickerStyle(.segmented)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            
+            VStack {
+                Text("Similarity Threshold")
+                Slider(value: $vm.similarityThreshold, in: 0.45...1.0, step: 0.025)
+                Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .padding(20)
     }
     
     var selectedFoldersPanel: some View {

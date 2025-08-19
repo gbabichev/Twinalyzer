@@ -10,9 +10,8 @@ import Foundation
 // MARK: - Analysis Configuration
 
 public enum AnalysisMode: String, CaseIterable, Identifiable {
-    case perceptualHash = "Perceptual Hash"
-    case deepFeature = "Deep Feature Embedding"
-    
+    case deepFeature = "Enhanced Scan" // Deep Feature Embedding
+    case perceptualHash = "Basic Scan" // Perceptual Hash
     public var id: String { rawValue }
 }
 

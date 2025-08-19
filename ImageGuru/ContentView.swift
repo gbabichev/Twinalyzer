@@ -10,7 +10,6 @@ struct ContentView: View {
     
     // Selection + sorting remains in the view for keyboard focus reasons
     @State var selectedRowID: String? = nil
-    @State var selectedRowIDs: Set<String> = []
     @State var sortOrder: [KeyPathComparator<TableRow>] = []
 
     var sortedRows: [TableRow] {
@@ -23,19 +22,15 @@ struct ContentView: View {
         sortedRows.first(where: { $0.id == selectedRowID })
     }
 
-    var selectedMatches: [String] {
-        vm.flattenedResults.filter { selectedRowIDs.contains($0.id) }.map { $0.similar }
-    }
-
-    private var settingsPopoverContent: some View {
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Global Settings").font(.headline)
-            Divider()
-            controlsPanelPopover
-        }
-        .padding(20)
-        .frame(width: 350)
-    }
+//    private var settingsPopoverContent: some View {
+//        return VStack(alignment: .leading, spacing: 16) {
+//            Text("Global Settings").font(.headline)
+//            Divider()
+//            controlsPanelPopover
+//        }
+//        .padding(20)
+//        .frame(width: 350)
+//    }
     
     var body: some View {
         Group {
@@ -68,7 +63,7 @@ struct ContentView: View {
                     Label("Settings", systemImage: "gearshape")
                 }
                 .popover(isPresented: $showSettingsPopover) {
-                    settingsPopoverContent
+                    controlsPanelPopover
                 }
             }
             
@@ -141,7 +136,7 @@ struct ContentView: View {
         
         // Clear table selections and sorting
         selectedRowID = nil
-        selectedRowIDs.removeAll()
+        //selectedRowIDs.removeAll()
         sortOrder.removeAll()
     }
     

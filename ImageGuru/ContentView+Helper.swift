@@ -52,7 +52,7 @@ public enum DisplayHelpers {
         if let progress = progress {
             return "\(Int(progress * 100))%"
         } else {
-            return "Preparing…"
+            return "Preparing..."
         }
     }
 }
