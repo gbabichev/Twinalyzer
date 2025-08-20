@@ -279,22 +279,124 @@ final class AppViewModel: ObservableObject {
     
     // MARK: - User Actions
     
-    /// Adds new parent folders while filtering and deduplicating
-    /// Only directories are accepted, and duplicates are automatically excluded
-    /// ENHANCED: Now triggers async folder discovery with batch limiting
-    func addParentFolders(_ urls: [URL]) {
-        let newParents = FileSystemHelpers.filterDirectories(from: urls)
-        let uniqueNewParents = FileSystemHelpers.uniqueURLs(from: newParents, existingURLs: selectedParentFolders)
-        
-        // Only proceed if we have new unique folders
-        guard !uniqueNewParents.isEmpty else { return }
-        
-        selectedParentFolders.append(contentsOf: uniqueNewParents)
-        
-        // Trigger async folder discovery using existing progress system
-        discoverFoldersAsync()
+    // Descendant check used by exclusion cleanup
+    private func isDescendant(_ child: URL, of ancestor: URL) -> Bool {
+        let a = ancestor.standardizedFileURL.pathComponents
+        let c = child.standardizedFileURL.pathComponents
+        return c.starts(with: a)
     }
-    
+
+    // Clear exclusions that live under the specified parents
+    private func removeExclusions(under parents: [URL]) {
+        guard !parents.isEmpty else { return }
+        let parentsStd = parents.map { $0.standardizedFileURL }
+        excludedLeafFolders = excludedLeafFolders.filter { leaf in
+            // keep only exclusions that are NOT under any newly added parent
+            !parentsStd.contains { parent in isDescendant(leaf, of: parent) }
+        }
+    }
+
+    /// Adds parent folders; re-adding an existing parent triggers a targeted rescan (no UI)
+    @MainActor
+    func addParentFolders(_ urls: [URL]) {
+        let dirs = FileSystemHelpers.filterDirectories(from: urls)
+        guard !dirs.isEmpty else { return }
+
+        // Partition incoming into "already present" vs "new"
+        let existing = Set(selectedParentFolders.map { $0.standardizedFileURL })
+        var toRescan: [URL] = []
+        var toAppend: [URL] = []
+
+        for u in dirs {
+            let s = u.standardizedFileURL
+            if existing.contains(s) {
+                toRescan.append(s)
+            } else {
+                toAppend.append(s)
+            }
+        }
+
+        if !toAppend.isEmpty {
+            selectedParentFolders.append(contentsOf: toAppend)
+            // Any leafs previously excluded under these parents are allowed back
+            removeExclusions(under: toAppend)
+            // Full discovery for new parents
+            discoverFoldersAsync()
+        }
+
+        // If we re-added already-present parents, run targeted rescan that clears exclusions under them
+        if !toRescan.isEmpty {
+            rescanSelectedParents(toRescan)
+        }
+    }
+
+    // MARK: - Targeted rescan (no UI)
+    /// Re-discovers leaf folders under the given parents, clears exclusions under them,
+    /// reconciles global exclusions, and updates active leafs.
+    @MainActor
+    private func rescanSelectedParents(_ parents: [URL]) {
+        guard !parents.isEmpty else { return }
+        guard !isAnyOperationRunning else { return }
+
+        isDiscoveringFolders = true
+        let parentsStd = parents.map { $0.standardizedFileURL }
+
+        discoveryTask?.cancel()
+        discoveryTask = Task {
+            let ignored = self.ignoredFolderName
+                .lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Discover leafs ONLY for these parents (off main actor)
+            let freshlyDiscovered: [URL] = await Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else { return [] }
+                var out: [URL] = []
+                for p in parentsStd {
+                    if Task.isCancelled { break }
+                    let leaves = await self.findLeafFoldersWithIgnoreFilter(root: p, ignoredName: ignored)
+                    out.append(contentsOf: leaves)
+                }
+                return out
+            }.value
+
+            guard !Task.isCancelled else {
+                await MainActor.run {
+                    self.isDiscoveringFolders = false
+                    self.discoveryTask = nil
+                }
+                return
+            }
+
+            await MainActor.run {
+                // 1) Remove previously discovered leafs that live under these parents
+                self.discoveredLeafFolders.removeAll { leaf in
+                    parentsStd.contains { self.isDescendant(leaf, of: $0) }
+                }
+
+                // 2) Merge freshly discovered leafs (dedupe)
+                var seen = Set(self.discoveredLeafFolders.map { $0.standardizedFileURL })
+                for leaf in freshlyDiscovered {
+                    let s = leaf.standardizedFileURL
+                    if !seen.contains(s) {
+                        self.discoveredLeafFolders.append(s)
+                        seen.insert(s)
+                    }
+                }
+
+                // 3) Clear exclusions that live under these parents (so removed leafs can return)
+                self.excludedLeafFolders = self.excludedLeafFolders.filter { ex in
+                    !parentsStd.contains { self.isDescendant(ex, of: $0) }
+                }
+
+                // 4) Global pruning: keep exclusions only if that leaf still exists
+                self.reconcileExclusionsWithDiscovered()
+
+                self.isDiscoveringFolders = false
+                self.discoveryTask = nil
+            }
+        }
+    }
+
     /// ENHANCED: Async folder discovery with batch limiting and memory pressure monitoring
     private func discoverFoldersAsync() {
         guard !selectedParentFolders.isEmpty else { return }
@@ -319,7 +421,10 @@ final class AppViewModel: ObservableObject {
             await MainActor.run {
                 if !Task.isCancelled {
                     self.discoveredLeafFolders = discovered
-                    
+
+                    // NEW: trim exclusions to only those that still exist in the latest discovery
+                    self.reconcileExclusionsWithDiscovered()
+
                     // Warn user if we hit limits
                     if discovered.count >= Self.maxDiscoveryBatchSize {
                         print("Warning: Discovery limited to \(Self.maxDiscoveryBatchSize) folders to prevent memory issues")
@@ -440,7 +545,7 @@ final class AppViewModel: ObservableObject {
     /// Excludes a leaf folder from analysis without removing it from discovery
     /// Allows users to fine-tune which discovered folders are actually analyzed
     func removeLeafFolder(_ leafURL: URL) {
-        excludedLeafFolders.insert(leafURL)
+        excludedLeafFolders.insert(leafURL.standardizedFileURL)
     }
     
     // MARK: - Enhanced Analysis Operations
@@ -754,4 +859,17 @@ final class AppViewModel: ObservableObject {
         }
         return field
     }
+
+    // MARK: - Exclusion reconciliation
+    /// Keep only exclusions that still exist in `discoveredLeafFolders`.
+    @MainActor
+    private func reconcileExclusionsWithDiscovered() {
+        let discoveredSet = Set(discoveredLeafFolders.map { $0.standardizedFileURL })
+        excludedLeafFolders = Set(
+            excludedLeafFolders
+                .map { $0.standardizedFileURL }
+                .filter { discoveredSet.contains($0) }
+        )
+    }
 }
+
