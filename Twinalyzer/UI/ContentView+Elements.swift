@@ -631,6 +631,18 @@ extension ContentView {
         }
         .tableStyle(.automatic)
         .navigationTitle("Results")
+        .focused($isTableFocused)
+        .onAppear {
+            // Ensure focus when table appears with data
+            if !sortedRows.isEmpty && tableSelection.isEmpty {
+                if let firstRow = sortedRows.first {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        tableSelection = [firstRow.id]
+                        isTableFocused = true
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - Detail Split View

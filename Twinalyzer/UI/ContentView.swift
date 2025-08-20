@@ -26,7 +26,8 @@ struct ContentView: View {
     
     @State var debouncedSelection: Set<String> = []
     @State var selectionDebounceTimer: Timer?
-    
+    @FocusState var isTableFocused: Bool
+
     
     // MARK: - Selection State Management
     // The app maintains two separate selection systems:
