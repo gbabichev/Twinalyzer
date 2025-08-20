@@ -636,11 +636,9 @@ extension ContentView {
             .width(min: 200, ideal: 250)
             
             // Similarity percentage column with monospaced font for alignment
-            TableColumn("Similarity", value: \.percentSortKey) { row in
-                Text(row.percentDisplay)
-                    .font(.system(.body, design: .monospaced))
-            }
-            .width(80)
+            TableColumn("Similarity", value: \.percent) { row in
+                Text(row.percentDisplay).font(.system(.body, design: .monospaced))
+            }.width(80)
         }
         .tableStyle(.automatic)
         .navigationTitle("Results")
