@@ -417,11 +417,13 @@ final class AppViewModel: ObservableObject {
                 }
                 
                 // Determine if this is a leaf folder
-                if subdirectories.isEmpty || hasImageFiles {
-                    // This is a leaf folder: either has no subdirectories, or has image files
+                if hasImageFiles {
+                    // Any folder with image files should be available for analysis
                     leafFolders.append(directory)
-                } else {
-                    // This is not a leaf folder, recurse into non-ignored subdirectories
+                }
+
+                // Always recurse into non-ignored subdirectories to find more image folders
+                if !subdirectories.isEmpty {
                     for subdir in subdirectories {
                         findLeafFolders(in: subdir)
                     }

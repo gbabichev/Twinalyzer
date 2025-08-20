@@ -21,7 +21,6 @@ struct ScrollOffsetPreferenceKey: PreferenceKey {
 
 extension ContentView {
     
-    
     // MARK: - Processing View
     /// Full-screen view displayed during image analysis OR folder discovery
     /// Shows progress bar for analysis, spinner for discovery
@@ -190,23 +189,16 @@ extension ContentView {
             Text("Settings").font(.headline)
             Divider()
             
-            // Scan depth control: top-level only vs recursive scanning
-            Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
-            
-            Divider()
-            
             // Ignored folder name input
             VStack(alignment: .leading, spacing: 8) {
+
                 HStack {
                     Text("Ignored Folder Name")
                         .font(.subheadline)
-                    Button(action: {}) {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.secondary)
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Enter a folder name to skip during scanning. For example, entering 'thumb' will ignore all folders named 'thumb' at any level in the directory tree.")
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
+                        .help("Enter a folder name to skip during scanning. For example, entering 'thumb' will ignore all folders named 'thumb' at any level in the directory tree.")
                 }
                 
                 HStack {
@@ -236,13 +228,10 @@ extension ContentView {
                     }
                 }
                 
-                // Show current ignored folder if set
-                if !vm.ignoredFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Currently ignoring: '\(vm.ignoredFolderName.trimmingCharacters(in: .whitespacesAndNewlines))'")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
+            
+            // Scan depth control: top-level only vs recursive scanning
+            Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
             
             Divider()
             
@@ -300,7 +289,6 @@ extension ContentView {
         }
         .padding(20)
     }
-
 
     // MARK: - Cross-Folder Duplicates Panel
     /// Top section of detail view showing folder relationships
@@ -531,24 +519,22 @@ extension ContentView {
     /// Displays discovered leaf folders with removal options
     var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-//            Text("Selected Folders")
-//                .font(.headline)
-//                .padding(.horizontal)
-//                .padding(.top)
-            
             // Show folders if any have been discovered
             if !vm.discoveredLeafFolders.isEmpty {
                 List {
                     ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
+
                         HStack {
-                            // Folder info: name and full path
+                            // Folder info: folder name and parent/folder structure
                             VStack(alignment: .leading, spacing: 2) {
+                                // PRIMARY: Just the folder name
                                 Text(leafURL.lastPathComponent)
                                     .font(.system(size: 13, weight: .medium))
                                     .lineLimit(1)
                                 
-                                Text(leafURL.path)
-                                    .font(.system(size: 11))
+                                // SECONDARY: Parent/folder structure (smaller, gray)
+                                Text(DisplayHelpers.formatFolderDisplayName(for: leafURL))
+                                    .font(.footnote)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -596,7 +582,6 @@ extension ContentView {
         .navigationTitle("Folders")
         .frame(minWidth: 250, idealWidth: 300)
     }
-    
     // MARK: - Results Table
     /// Center panel displaying comparison results in sortable table format
     /// Includes checkboxes for deletion selection and similarity percentages

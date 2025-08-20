@@ -229,7 +229,6 @@ struct ContentView: View {
         ) { result in
             vm.handleCSVExportResult(result)
         }
-
     }
     
 }

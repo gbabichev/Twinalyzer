@@ -52,9 +52,15 @@ public enum DisplayHelpers {
     /// Creates a hierarchical display like "Photos/Vacation" for better folder identification
     /// Falls back to just the folder name if no parent context is available
     public static func formatFolderDisplayName(for url: URL) -> String {
-        let name = url.lastPathComponent
-        let parent = url.deletingLastPathComponent().lastPathComponent
-        return parent.isEmpty ? name : "\(parent)/\(name)"
+        let folderName = url.lastPathComponent
+        let parentName = url.deletingLastPathComponent().lastPathComponent
+        
+        // If parent is empty, root, or same as folder, just show folder name
+        if parentName.isEmpty || parentName == "/" || parentName == folderName {
+            return folderName
+        }
+        
+        return "\(parentName)/\(folderName)"
     }
     
     /// Creates a summary string for processing progress
@@ -128,5 +134,5 @@ extension ContentView {
         } else {
             isScrolledToBottom = true // Non-scrollable content is considered "at bottom"
         }
-    }    
+    }
 }
