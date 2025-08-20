@@ -16,9 +16,14 @@ import ImageIO
 /// Central view model managing all app state, analysis operations, and UI coordination
 /// Implements ObservableObject for SwiftUI reactive updates
 /// All operations must run on MainActor for thread safety
-/// OPTIMIZED VERSION: Caches expensive computations to prevent recalculation on selection changes
+/// ENHANCED: Added memory pressure monitoring and batch size limiting to prevent beachballing
 @MainActor
 final class AppViewModel: ObservableObject {
+    
+    // MARK: - Configuration Constants
+    private nonisolated static let maxDiscoveryBatchSize = 2000     // Limit folder discovery to prevent memory issues
+    private nonisolated static let discoveryChunkSize = 100         // Process folders in chunks
+    private nonisolated static let progressUpdateThrottle = 0.1     // Minimum time between progress updates
     
     // MARK: - Core Published State
     /// Only the essential state that needs to be stored and observed
@@ -52,10 +57,11 @@ final class AppViewModel: ObservableObject {
     private var _flattenedResultsSortedCache: [TableRow]?
     private var _sortedResultsCache: [String: [TableRow]] = [:]
     
-    // MARK: - Task Management
-    /// Simple cancellation mechanism for long-running analysis operations
+    // MARK: - Enhanced Task Management
+    /// Enhanced cancellation mechanism for long-running operations
     private var analysisTask: Task<Void, Never>?
-    private var discoveryTask: Task<Void, Never>?  // NEW: Track folder discovery task
+    private var discoveryTask: Task<Void, Never>?
+    private var lastProgressUpdate: Date = .distantPast    // Throttle progress updates
     
     // MARK: - Computed Properties (Non-Cached - These are lightweight)
     /// These properties derive their values from simple state and remain uncached
@@ -268,7 +274,7 @@ final class AppViewModel: ObservableObject {
     
     /// Adds new parent folders while filtering and deduplicating
     /// Only directories are accepted, and duplicates are automatically excluded
-    /// NEW: Now triggers async folder discovery instead of immediate computation
+    /// ENHANCED: Now triggers async folder discovery with batch limiting
     func addParentFolders(_ urls: [URL]) {
         let newParents = FileSystemHelpers.filterDirectories(from: urls)
         let uniqueNewParents = FileSystemHelpers.uniqueURLs(from: newParents, existingURLs: selectedParentFolders)
@@ -282,7 +288,7 @@ final class AppViewModel: ObservableObject {
         discoverFoldersAsync()
     }
     
-    /// NEW: Async folder discovery that reuses the existing progress UI system
+    /// ENHANCED: Async folder discovery with batch limiting and memory pressure monitoring
     private func discoverFoldersAsync() {
         guard !selectedParentFolders.isEmpty else { return }
         guard !isAnyOperationRunning else { return } // Don't start if already processing
@@ -297,20 +303,124 @@ final class AppViewModel: ObservableObject {
         let foldersToScan = selectedParentFolders
         
         discoveryTask = Task {
-            // Do the heavy work off the main thread
+            // Do the heavy work off the main thread with enhanced safety
             let discovered = await Task.detached(priority: .userInitiated) {
-                ImageAnalyzer.foldersToScan(from: foldersToScan)
+                await self.discoverFoldersWithLimits(from: foldersToScan)
             }.value
             
             // Update on main thread if not cancelled
             await MainActor.run {
                 if !Task.isCancelled {
                     self.discoveredLeafFolders = discovered
+                    
+                    // Warn user if we hit limits
+                    if discovered.count >= Self.maxDiscoveryBatchSize {
+                        print("Warning: Discovery limited to \(Self.maxDiscoveryBatchSize) folders to prevent memory issues")
+                    }
                 }
                 self.isDiscoveringFolders = false
                 self.discoveryTask = nil
             }
         }
+    }
+    
+    /// Enhanced folder discovery with memory pressure monitoring and batch limiting
+    private func discoverFoldersWithLimits(from roots: [URL]) async -> [URL] {
+        var discovered: [URL] = []
+        discovered.reserveCapacity(Self.maxDiscoveryBatchSize)
+        
+        for root in roots {
+            // Check for cancellation
+            if Task.isCancelled { break }
+            
+            // Check memory pressure
+            if await isMemoryPressureHigh() {
+                print("Warning: High memory pressure detected during folder discovery")
+                break
+            }
+            
+            // Process this root with chunking
+            let rootFolders = await discoverSingleRootWithChunking(root)
+            
+            // Add to results but respect batch size limit
+            for folder in rootFolders {
+                if discovered.count >= Self.maxDiscoveryBatchSize {
+                    break
+                }
+                discovered.append(folder)
+            }
+            
+            if discovered.count >= Self.maxDiscoveryBatchSize {
+                break
+            }
+            
+            // Yield control after each root
+            await Task.yield()
+        }
+        
+        return discovered
+    }
+    
+    /// Discover folders under a single root with chunked processing
+    private func discoverSingleRootWithChunking(_ root: URL) async -> [URL] {
+        let fm = FileManager.default
+        var folders: [URL] = []
+        
+        // Check if root is a directory
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+        
+        // Process directories in chunks to avoid blocking
+        let (allURLs, maxBatchSize) = await Task.detached {
+            let batchLimit = 2000 // Local constant to avoid actor isolation issues
+            
+            guard let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { return ([URL](), batchLimit) }
+            
+            var urls: [URL] = []
+            let allElements = Array(enumerator.compactMap { $0 as? URL })
+            
+            for url in allElements {
+                if let resourceValues = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
+                   (resourceValues.isDirectory ?? false),
+                   !(resourceValues.isHidden ?? false) {
+                    urls.append(url)
+                }
+                
+                // Respect memory limits
+                if urls.count >= batchLimit {
+                    break
+                }
+            }
+            return (urls, batchLimit)
+        }.value
+        
+        // Process the URLs with yielding
+        var count = 0
+        for url in allURLs {
+            // Check for cancellation every chunk
+            if Task.isCancelled { break }
+            
+            // Yield control periodically
+            count += 1
+            if count % 100 == 0 { // Use literal instead of static property
+                await Task.yield()
+            }
+            
+            folders.append(url)
+            
+            // Respect memory limits
+            if folders.count >= maxBatchSize {
+                break
+            }
+        }
+        
+        return folders
     }
     
     /// Excludes a leaf folder from analysis without removing it from discovery
@@ -319,10 +429,10 @@ final class AppViewModel: ObservableObject {
         excludedLeafFolders.insert(leafURL)
     }
     
-    // MARK: - Analysis Operations
+    // MARK: - Enhanced Analysis Operations
     /// Starts image analysis using the selected method (deep feature or perceptual hash)
     /// Manages progress tracking, cancellation, and result processing
-    /// Prevents multiple concurrent analyses and provides progress callbacks
+    /// ENHANCED: Added throttled progress updates and memory pressure monitoring
     func processImages(progress: @escaping @Sendable (Double) -> Void) {
         guard !isAnyOperationRunning else { return }
         
@@ -336,10 +446,15 @@ final class AppViewModel: ObservableObject {
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
 
-        // Progress wrapper that updates both internal state and external callback
+        // Enhanced progress wrapper with throttling
         let progressWrapper: @Sendable (Double) -> Void = { [weak self] p in
             Task { @MainActor in
-                self?.processingProgress = p
+                // Throttle progress updates to prevent UI spam
+                let now = Date()
+                if let self = self, now.timeIntervalSince(self.lastProgressUpdate) >= Self.progressUpdateThrottle {
+                    self.lastProgressUpdate = now
+                    self.processingProgress = p
+                }
             }
             DispatchQueue.main.async { progress(p) }
         }
@@ -393,7 +508,7 @@ final class AppViewModel: ObservableObject {
     }
 
     /// Cancels the current analysis operation and resets processing state
-    /// NEW: Enhanced to handle both analysis and discovery cancellation
+    /// ENHANCED: Enhanced to handle both analysis and discovery cancellation
     func cancelAnalysis() {
         cancelAllOperations()
         isProcessing = false
@@ -401,7 +516,7 @@ final class AppViewModel: ObservableObject {
         processingProgress = nil
     }
     
-    /// NEW: Cancel all background operations
+    /// Cancel all background operations
     private func cancelAllOperations() {
         analysisTask?.cancel()
         analysisTask = nil
@@ -460,7 +575,7 @@ final class AppViewModel: ObservableObject {
         !selectedMatchesForDeletion.isEmpty
     }
     
-    /// IMPROVED: Non-published method to handle selection toggle
+    /// Non-published method to handle selection toggle
     /// This prevents the "Publishing changes from within view updates" warning
     func toggleSelection(for rowIDs: Set<String>) {
         if rowIDs.count > 1 {
@@ -522,5 +637,32 @@ final class AppViewModel: ObservableObject {
         
         // Clear all analysis results (this will automatically invalidate caches)
         comparisonResults.removeAll()
+    }
+    
+    // MARK: - Memory Pressure Monitoring
+    /// Checks if system is under memory pressure
+    /// Returns true if available memory is low
+    private func isMemoryPressureHigh() async -> Bool {
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                var info = mach_task_basic_info()
+                var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
+                let kerr = withUnsafeMutablePointer(to: &info) {
+                    $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+                    }
+                }
+                
+                if kerr == KERN_SUCCESS {
+                    // Use 512MB as threshold for high memory usage
+                    let memoryThreshold: UInt64 = 512 * 1024 * 1024
+                    let isHighMemory = info.resident_size > memoryThreshold
+                    continuation.resume(returning: isHighMemory)
+                } else {
+                    // If we can't get memory info, assume we're fine
+                    continuation.resume(returning: false)
+                }
+            }
+        }
     }
 }

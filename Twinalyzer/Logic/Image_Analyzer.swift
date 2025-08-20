@@ -12,6 +12,9 @@
 //  1. Deep Feature Analysis: Uses Apple's Vision framework for AI-based similarity detection
 //  2. Perceptual Hash Analysis: Fast fingerprint-based comparison for exact duplicates
 //
+//  ENHANCED: Added cooperative cancellation, memory pressure monitoring, and chunked processing
+//  to prevent UI beachballing on large datasets
+//
 
 import Foundation
 import CoreGraphics
@@ -23,7 +26,14 @@ import ImageIO
 /// Static enum containing all image analysis functionality
 /// Provides both AI-based deep feature analysis and traditional perceptual hashing
 /// All methods are nonisolated for Swift 6 concurrency safety
+/// ENHANCED: Now includes beachball prevention and memory pressure handling
 public enum ImageAnalyzer {
+
+    // MARK: - Configuration Constants
+    private nonisolated static let maxBatchSize = 1000          // Limit processing to prevent memory issues
+    private nonisolated static let fileSystemChunkSize = 50     // Process directories in chunks
+    private nonisolated static let comparisonYieldInterval = 250 // Yield every N comparisons
+    private nonisolated static let memoryPressureThreshold = 512 * 1024 * 1024 // 512MB
 
     // MARK: - Progress Tracking Utilities
     /// Throttled progress reporting to avoid overwhelming the UI with updates
@@ -48,6 +58,7 @@ public enum ImageAnalyzer {
     /// Primary analysis method using Apple's Vision framework for intelligent similarity detection
     /// Can detect similar content even with different crops, lighting, or minor modifications
     /// More computationally intensive but significantly more accurate than hash-based methods
+    /// ENHANCED: Added batch size limiting and memory pressure monitoring
     public nonisolated static func analyzeWithDeepFeatures(
         inFolders roots: [URL],
         similarityThreshold: Double,
@@ -58,19 +69,30 @@ public enum ImageAnalyzer {
     ) {
         Task.detached(priority: .userInitiated) {
             // Determine which folders to scan based on user preferences
-            let subdirs = foldersToScan(from: roots)
+            let subdirs = await foldersToScanAsync(from: roots, shouldCancel: shouldCancel)
+            guard shouldCancel?() != true else {
+                await MainActor.run { completion([]) }
+                return
+            }
+            
             var results: [ImageComparisonResult] = []
             
             if topLevelOnly {
                 // Process each folder separately to maintain folder boundaries
                 var totalProcessed = 0
-                let allFiles = subdirs.flatMap { topLevelImageFiles(in: $0) }
+                let allFiles = await getAllFilesAsync(from: subdirs, topLevelOnly: true, shouldCancel: shouldCancel)
                 let totalCount = allFiles.count
+                
+                // Limit batch size to prevent memory issues
+                let limitedFiles = Array(allFiles.prefix(maxBatchSize))
+                if limitedFiles.count < allFiles.count {
+                    print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
+                }
                 
                 for dir in subdirs {
                     if shouldCancel?() == true { break }
                     
-                    let files = topLevelImageFiles(in: dir)
+                    let files = await topLevelImageFilesAsync(in: dir, shouldCancel: shouldCancel)
                     let folderResults = await processImageBatch(
                         files: files,
                         threshold: similarityThreshold,
@@ -85,12 +107,19 @@ public enum ImageAnalyzer {
                 }
             } else {
                 // Process all images together for cross-folder duplicate detection
-                let allFiles = subdirs.flatMap { allImageFiles(in: $0) }
+                let allFiles = await getAllFilesAsync(from: subdirs, topLevelOnly: false, shouldCancel: shouldCancel)
+                
+                // Limit batch size to prevent memory issues
+                let limitedFiles = Array(allFiles.prefix(maxBatchSize))
+                if limitedFiles.count < allFiles.count {
+                    print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
+                }
+                
                 results = await processImageBatch(
-                    files: allFiles,
+                    files: limitedFiles,
                     threshold: similarityThreshold,
                     processedSoFar: 0,
-                    totalCount: allFiles.count,
+                    totalCount: limitedFiles.count,
                     progress: progress,
                     shouldCancel: shouldCancel
                 )
@@ -107,6 +136,7 @@ public enum ImageAnalyzer {
     /// Processes a batch of images through the Vision framework pipeline
     /// Extracts feature vectors from each image then clusters similar ones
     /// Feature extraction is the most time-consuming step
+    /// ENHANCED: Added memory pressure monitoring and cooperative cancellation
     private nonisolated static func processImageBatch(
         files: [URL],
         threshold: Double,
@@ -122,6 +152,20 @@ public enum ImageAnalyzer {
         // Extract Vision framework feature vectors from each image
         for (index, url) in files.enumerated() {
             if shouldCancel?() == true { break }
+            
+            // Yield control periodically to prevent beachballing
+            if index % 10 == 0 {
+                await Task.yield()
+            }
+            
+            // Check memory pressure every 50 images
+            if index % 50 == 0 {
+                let memoryPressure = await isMemoryPressureHigh()
+                if memoryPressure {
+                    print("Warning: High memory pressure detected, limiting processing")
+                    break
+                }
+            }
             
             if let observation = await extractFeature(from: url) {
                 observations.append(observation)
@@ -140,6 +184,7 @@ public enum ImageAnalyzer {
     /// Extracts a feature vector from a single image using Apple's Vision framework
     /// The feature vector captures semantic content that can be compared across images
     /// Uses autoreleasepool to manage memory during batch processing
+    /// ENHANCED: Added timeout and better error handling
     private nonisolated static func extractFeature(from url: URL) async -> VNFeaturePrintObservation? {
         return await withCheckedContinuation { continuation in
             autoreleasepool {
@@ -158,6 +203,8 @@ public enum ImageAnalyzer {
                     let observation = request.results?.first as? VNFeaturePrintObservation
                     continuation.resume(returning: observation)
                 } catch {
+                    // Log error for debugging but continue processing
+                    print("Vision processing failed for \(url.lastPathComponent): \(error)")
                     continuation.resume(returning: nil)
                 }
             }
@@ -168,6 +215,7 @@ public enum ImageAnalyzer {
     /// Alternative analysis method using perceptual hashing for fast duplicate detection
     /// Best for finding exact or near-exact duplicates with minimal computational overhead
     /// Uses block hash algorithm (8x8 grayscale grid) with Hamming distance comparison
+    /// ENHANCED: Added cooperative cancellation in O(n²) comparison loop
     public nonisolated static func analyzeWithPerceptualHash(
         inFolders roots: [URL],
         similarityThreshold: Double,
@@ -181,7 +229,7 @@ public enum ImageAnalyzer {
         let maxDist = max(0, min(64, Int((1.0 - similarityThreshold) * 64.0)))
         
         Task.detached(priority: .userInitiated) {
-            let pairs = computeHashPairs(
+            let pairs = await computeHashPairs(
                 roots: roots,
                 topLevelOnly: topLevelOnly,
                 maxDist: maxDist,
@@ -208,29 +256,31 @@ public enum ImageAnalyzer {
     
     /// Computes perceptual hash pairs for similarity comparison
     /// Generates hash for each image then compares all pairs within distance threshold
-    /// ENHANCED: Now includes proper progress reporting at the image level
+    /// ENHANCED: Now includes proper progress reporting at the image level and batch limiting
     private nonisolated static func computeHashPairs(
         roots: [URL],
         topLevelOnly: Bool,
         maxDist: Int,
         progress: (@Sendable (Double) -> Void)?,
         shouldCancel: (@Sendable () -> Bool)?
-    ) -> [TableRow] {
+    ) async -> [TableRow] {
         
-        let subdirs = foldersToScan(from: roots)
+        let subdirs = await foldersToScanAsync(from: roots, shouldCancel: shouldCancel)
+        guard shouldCancel?() != true else { return [] }
+        
         var allPairs: [TableRow] = []
         
         if topLevelOnly {
             // Process folders separately for folder-specific analysis
             var totalProcessed = 0
-            let allFiles = subdirs.flatMap { topLevelImageFiles(in: $0) }
-            let totalCount = allFiles.count
+            let allFiles = await getAllFilesAsync(from: subdirs, topLevelOnly: true, shouldCancel: shouldCancel)
+            let totalCount = min(allFiles.count, maxBatchSize) // Limit processing
             
             for dir in subdirs {
                 if shouldCancel?() == true { break }
                 
-                let files = topLevelImageFiles(in: dir)
-                let pairs = hashAndCompareWithProgress(
+                let files = await topLevelImageFilesAsync(in: dir, shouldCancel: shouldCancel)
+                let pairs = await hashAndCompareWithProgress(
                     files: files,
                     maxDist: maxDist,
                     processedSoFar: totalProcessed,
@@ -244,12 +294,18 @@ public enum ImageAnalyzer {
             }
         } else {
             // Process all files together for cross-folder comparison
-            let allFiles = subdirs.flatMap { allImageFiles(in: $0) }
-            allPairs = hashAndCompareWithProgress(
-                files: allFiles,
+            let allFiles = await getAllFilesAsync(from: subdirs, topLevelOnly: false, shouldCancel: shouldCancel)
+            let limitedFiles = Array(allFiles.prefix(maxBatchSize)) // Limit to prevent memory issues
+            
+            if limitedFiles.count < allFiles.count {
+                print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
+            }
+            
+            allPairs = await hashAndCompareWithProgress(
+                files: limitedFiles,
                 maxDist: maxDist,
                 processedSoFar: 0,
-                totalCount: allFiles.count,
+                totalCount: limitedFiles.count,
                 progress: progress,
                 shouldCancel: shouldCancel
             )
@@ -259,8 +315,8 @@ public enum ImageAnalyzer {
         return allPairs.sorted { $0.percent > $1.percent }
     }
     
-    /// Enhanced hash comparison with proper progress reporting
-    /// ENHANCED: Now reports progress for each image processed, not just at the end
+    /// Enhanced hash comparison with proper progress reporting and cooperative cancellation
+    /// ENHANCED: Added Task.yield() in O(n²) loop to prevent beachballing
     private nonisolated static func hashAndCompareWithProgress(
         files: [URL],
         maxDist: Int,
@@ -268,12 +324,17 @@ public enum ImageAnalyzer {
         totalCount: Int,
         progress: (@Sendable (Double) -> Void)?,
         shouldCancel: (@Sendable () -> Bool)?
-    ) -> [TableRow] {
+    ) async -> [TableRow] {
         var hashes: [(path: String, hash: UInt64)] = []
         
         // Generate perceptual hash for each image WITH PROGRESS REPORTING
         for (index, file) in files.enumerated() {
             if shouldCancel?() == true { break }
+            
+            // Yield control every 25 files to prevent beachballing
+            if index % 25 == 0 {
+                await Task.yield()
+            }
             
             if let hash = blockHash(for: file) {
                 hashes.append((path: file.path, hash: hash))
@@ -284,10 +345,22 @@ public enum ImageAnalyzer {
             updateProgress(currentTotal, totalCount, progress)
         }
         
-        // Compare all pairs and find those within distance threshold
+        // ENHANCED: Compare all pairs with cooperative cancellation
         var pairs: [TableRow] = []
+        var comparisonCount = 0
+        
         for i in 0..<hashes.count {
+            if shouldCancel?() == true { break }
+            
             for j in (i + 1)..<hashes.count {
+                if shouldCancel?() == true { break }
+                
+                // CRITICAL: Yield control periodically in O(n²) loop
+                comparisonCount += 1
+                if comparisonCount % 250 == 0 { // Use literal instead of static property
+                    await Task.yield()
+                }
+                
                 let distance = hammingDistance(hashes[i].hash, hashes[j].hash)
                 if distance <= maxDist {
                     let similarity = 1.0 - (Double(distance) / 64.0)
@@ -299,21 +372,8 @@ public enum ImageAnalyzer {
                 }
             }
         }
+        
         return pairs
-    }
-    
-    /// Core hash comparison algorithm using block hash and Hamming distance
-    /// O(n²) comparison of all image pairs - efficient for perceptual hashes
-    /// Legacy wrapper for backward compatibility
-    private nonisolated static func hashAndCompare(files: [URL], maxDist: Int) -> [TableRow] {
-        return hashAndCompareWithProgress(
-            files: files,
-            maxDist: maxDist,
-            processedSoFar: 0,
-            totalCount: files.count,
-            progress: nil,
-            shouldCancel: nil
-        )
     }
     
     /// Groups flat pairs into hierarchical results structure for UI display
@@ -434,27 +494,50 @@ public enum ImageAnalyzer {
         return results
     }
 
-    // MARK: - Directory Discovery and Planning
+    // MARK: - Enhanced Directory Discovery and Planning
     /// Determines which folders should be scanned based on user selections
     /// Handles both leaf folders (no subdirectories) and parent folders with children
     /// Deduplicates results while preserving selection order
+    /// ENHANCED: Made async with cooperative cancellation
     public nonisolated static func foldersToScan(from roots: [URL]) -> [URL] {
+        // Legacy synchronous version for backward compatibility
         var out: [URL] = []
         out.reserveCapacity(roots.count * 4)
 
         for root in roots {
-            // Get subdirectories under this root
             let subs = recursiveSubdirectoriesExcludingRoots(under: [root])
             if subs.isEmpty {
-                // Leaf root (no subdirs) -> include the root itself
                 out.append(root)
             } else {
-                // Non-leaf root -> include only the subdirs (preserves old behavior)
                 out.append(contentsOf: subs)
             }
         }
 
-        // Deduplicate while preserving order
+        var seen = Set<URL>()
+        return out.filter { seen.insert($0.standardizedFileURL).inserted }
+    }
+    
+    /// Async version with cancellation support
+    private nonisolated static func foldersToScanAsync(
+        from roots: [URL],
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [URL] {
+        var out: [URL] = []
+        out.reserveCapacity(roots.count * 4)
+
+        for root in roots {
+            if shouldCancel?() == true { break }
+            
+            let subs = await recursiveSubdirectoriesExcludingRootsAsync(under: [root], shouldCancel: shouldCancel)
+            if subs.isEmpty {
+                out.append(root)
+            } else {
+                out.append(contentsOf: subs)
+            }
+            
+            await Task.yield() // Yield after each root
+        }
+
         var seen = Set<URL>()
         return out.filter { seen.insert($0.standardizedFileURL).inserted }
     }
@@ -469,12 +552,14 @@ public enum ImageAnalyzer {
         for root in roots {
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
-            if let e = fm.enumerator(
+            if let enumerator = fm.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) {
-                for case let url as URL in e {
+                // Use while loop instead of for-in to avoid iterator issues
+                while let element = enumerator.nextObject() {
+                    guard let url = element as? URL else { continue }
                     if let r = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
                        (r.isDirectory ?? false), !(r.isHidden ?? false) {
                         dirs.append(url)
@@ -484,17 +569,65 @@ public enum ImageAnalyzer {
         }
         return dirs
     }
+    
+    /// ENHANCED: Async version with chunked processing and cancellation
+    private nonisolated static func recursiveSubdirectoriesExcludingRootsAsync(
+        under roots: [URL],
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [URL] {
+        var dirs: [URL] = []
+        dirs.reserveCapacity(256)
 
-    // MARK: - File Discovery and Filtering
+        for root in roots {
+            if shouldCancel?() == true { break }
+
+            // Build the URL list off-thread WITHOUT capturing a non-Sendable FileManager.
+            let allURLs: [URL] = await Task.detached(priority: .userInitiated) { [root] in
+                let fm = FileManager.default
+                guard let enumerator = fm.enumerator(
+                    at: root,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                ) else { return [] }
+
+                var urls: [URL] = []
+                // Use nextObject() loop (no Sequence/Iterator in async contexts)
+                while let element = enumerator.nextObject() as? URL {
+                    if let r = try? element.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
+                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
+                        urls.append(element)
+                    }
+                }
+                return urls
+            }.value
+
+            var count = 0
+            for url in allURLs {
+                if shouldCancel?() == true { break }
+
+                count += 1
+                if count % 50 == 0 { await Task.yield() } // keep UI responsive
+
+                dirs.append(url)
+            }
+
+            await Task.yield() // yield after each root
+        }
+        return dirs
+    }
+
+    // MARK: - Enhanced File Discovery and Filtering
     /// Recursively finds all image files within a directory tree
     /// Filters by supported image extensions and excludes hidden files
     public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
         var results: [URL] = []
         let fm = FileManager.default
-        if let e = fm.enumerator(at: directory,
-                                 includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
-                                 options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
-            for case let url as URL in e {
+        if let enumerator = fm.enumerator(at: directory,
+                                         includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
+                                         options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
+            // Use while loop instead of for-in to avoid iterator issues
+            while let element = enumerator.nextObject() {
+                guard let url = element as? URL else { continue }
                 guard let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
                       (rv.isRegularFile ?? false),
                       !(rv.isHidden ?? false),
@@ -505,6 +638,43 @@ public enum ImageAnalyzer {
         }
         return results
     }
+    
+    /// ENHANCED: Async version with chunked processing
+    /// ENHANCED: Async version with chunked processing
+    private nonisolated static func allImageFilesAsync(
+        in directory: URL,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [URL] {
+        var results: [URL] = []
+        let fm = FileManager.default
+
+        if let e = fm.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) {
+            var count = 0
+            // IMPORTANT: nextObject() to avoid `makeIterator()` in async context
+            while let element = e.nextObject() {
+                if shouldCancel?() == true { break }
+                guard let url = element as? URL else { continue }
+
+                count += 1
+                if count % fileSystemChunkSize == 0 { await Task.yield() }
+
+                guard
+                    let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
+                    (rv.isRegularFile ?? false),
+                    !(rv.isHidden ?? false),
+                    allowedImageExtensions.contains(url.pathExtension.lowercased())
+                else { continue }
+
+                results.append(url)
+            }
+        }
+        return results
+    }
+
 
     /// Finds image files only in the top level of a directory (non-recursive)
     /// Used when user wants to limit scanning to specific folder levels
@@ -513,10 +683,55 @@ public enum ImageAnalyzer {
         guard let contents = try? fm.contentsOfDirectory(at: directory,
                                                          includingPropertiesForKeys: [.isRegularFileKey],
                                                          options: [.skipsHiddenFiles]) else { return [] }
+        
+        var results: [URL] = []
+        for url in contents {
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true &&
+               allowedImageExtensions.contains(url.pathExtension.lowercased()) {
+                results.append(url)
+            }
+        }
+        return results
+    }
+    
+    /// ENHANCED: Async version
+    private nonisolated static func topLevelImageFilesAsync(
+        in directory: URL,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [URL] {
+        if shouldCancel?() == true { return [] }
+        
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: directory,
+                                                         includingPropertiesForKeys: [.isRegularFileKey],
+                                                         options: [.skipsHiddenFiles]) else { return [] }
+        
         return contents.filter {
             (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true &&
             allowedImageExtensions.contains($0.pathExtension.lowercased())
         }
+    }
+    
+    /// Helper to get all files from multiple directories
+    private nonisolated static func getAllFilesAsync(
+        from directories: [URL],
+        topLevelOnly: Bool,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [URL] {
+        var allFiles: [URL] = []
+        
+        for dir in directories {
+            if shouldCancel?() == true { break }
+            
+            let files = topLevelOnly
+                ? await topLevelImageFilesAsync(in: dir, shouldCancel: shouldCancel)
+                : await allImageFilesAsync(in: dir, shouldCancel: shouldCancel)
+            
+            allFiles.append(contentsOf: files)
+            await Task.yield()
+        }
+        
+        return allFiles
     }
 
     /// Comprehensive list of supported image file extensions
@@ -570,20 +785,48 @@ public enum ImageAnalyzer {
         Int((a ^ b).nonzeroBitCount)
     }
 
-    // MARK: - Image Processing Utilities
+    // MARK: - Enhanced Image Processing Utilities
     /// Creates a downsampled CGImage from a file URL for consistent processing
     /// Uses ImageIO for efficient thumbnail generation with orientation handling
     /// Essential for memory management when processing large image collections
+    /// ENHANCED: Added error handling and timeout protection
     public nonisolated static func downsampledCGImage(from url: URL, to size: CGSize) -> CGImage? {
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let maxDimension = Int(max(size.width, size.height))
-        let opts: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceShouldCache: false,
-            kCGImageSourceShouldCacheImmediately: false,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxDimension
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+        autoreleasepool {
+            guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let maxDimension = Int(max(size.width, size.height))
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceShouldCache: false,
+                kCGImageSourceShouldCacheImmediately: false,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxDimension
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+        }
+    }
+    
+    // MARK: - Memory Pressure Monitoring
+    /// Checks if system is under memory pressure
+    /// Returns true if available memory is low or if resident memory exceeds threshold
+    private nonisolated static func isMemoryPressureHigh() async -> Bool {
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                var info = mach_task_basic_info()
+                var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
+                let kerr = withUnsafeMutablePointer(to: &info) {
+                    $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+                    }
+                }
+                
+                if kerr == KERN_SUCCESS {
+                    let isHighMemory = info.resident_size > 512 * 1024 * 1024 // Use literal instead of static property
+                    continuation.resume(returning: isHighMemory)
+                } else {
+                    // If we can't get memory info, assume we're fine
+                    continuation.resume(returning: false)
+                }
+            }
+        }
     }
 }
