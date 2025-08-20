@@ -24,7 +24,7 @@ struct TwinalyzerApp: App {
         }
     
         // MARK: - Custom About Window
-        Window("About Thumbnailer", id: "AboutWindow") {
+        Window("About Twinalyzer", id: "AboutWindow") {
             AboutView()
                 .frame(width: 400, height: 400)
         }

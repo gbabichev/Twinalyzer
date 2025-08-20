@@ -7,11 +7,9 @@
  
  */
 
-//
 //  Centralized image caching for preview thumbnails
 //  Provides memory-efficient thumbnail generation and intelligent cache bucket sizing
 //  ENHANCED: Added memory pressure monitoring and timeout protection
-//
 
 import AppKit
 import ImageIO
@@ -47,8 +45,9 @@ public final class ImageCache {
     }
     
     /// Configure cache limits based on current memory situation
+    /// Nonisolated to be callable from anywhere; hops to main actor internally.
     private nonisolated static func configureCacheLimits() {
-        Task {
+        Task.detached(priority: .utility) {
             let isHighMemory = await isMemoryPressureHigh()
             await MainActor.run {
                 if isHighMemory {
@@ -62,13 +61,15 @@ public final class ImageCache {
         }
     }
 
+    /// Periodically re-evaluate limits under possible memory pressure.
     private nonisolated static func setupMemoryPressureMonitoring() {
-        // Timer runs on run loop; keep the body minimal and hop to Task
+        // Timer runs on the current run loop; keep work minimal.
         Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
             configureCacheLimits()
         }
     }
 
+    /// Reads current resident memory usage to infer pressure.
     private nonisolated static func isMemoryPressureHigh() async -> Bool {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
@@ -94,7 +95,7 @@ public final class ImageCache {
     
     /// Force cache cleanup when memory pressure is detected
     public static func clearCacheIfNeeded() {
-        Task {
+        Task.detached(priority: .utility) {
             let isHighMemory = await isMemoryPressureHigh()
             if isHighMemory {
                 await MainActor.run {
@@ -112,6 +113,7 @@ public final class ImageCache {
 public enum ImageProcessingUtilities {
     
     // MARK: - Configuration
+    // Keep private, but DO NOT use in a default argument (fixes the compiler error).
     private nonisolated static let processingTimeout: TimeInterval = 15.0  // 15 second timeout
     private nonisolated static let maxImageDimension: CGFloat = 8192       // Reject extremely large images
     
@@ -154,17 +156,19 @@ public enum ImageProcessingUtilities {
     }
     
     /// Synchronous generator wrapped in an async timeout race
+    /// NOTE: `timeout` is optional to avoid referencing a private const in a default argument.
     public nonisolated static func downsampledCGImageWithTimeout(
         at url: URL,
         targetMaxDimension: CGFloat,
-        timeout: TimeInterval = 15.0
+        timeout: TimeInterval? = nil
     ) async -> CGImage? {
+        let effectiveTimeout = timeout ?? processingTimeout
         return await withTaskGroup(of: CGImage?.self) { group in
             group.addTask {
                 return downsampledCGImage(at: url, targetMaxDimension: targetMaxDimension)
             }
             group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(effectiveTimeout * 1_000_000_000))
                 return nil
             }
             let result = await group.next()

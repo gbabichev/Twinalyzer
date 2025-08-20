@@ -15,23 +15,21 @@ import ImageIO
 /// High-performance SwiftUI view for displaying image thumbnails with intelligent caching
 /// Handles async loading, memory management, and performance optimization for large image collections
 /// Uses bucketed caching system to balance memory usage with display quality
-/// ENHANCED: Added timeout protection, better error handling, and memory pressure monitoring
+/// ENHANCED: Uses ImageProcessingUtilities timeout helper and QoS mapped from TaskPriority
 struct PreviewImage: View {
     let path: String              // File system path to the image
     let maxDimension: CGFloat     // Maximum width/height for the displayed image
     let priority: TaskPriority    // Loading priority for this image
     
-    @State private var image: NSImage?  // Currently loaded image (nil while loading)
-    @State private var isLoading: Bool = false     // Loading state for better UX
-    @State private var hasAppeared: Bool = false   // Track if view has appeared (lazy loading)
+    @State private var image: NSImage?            // Currently loaded image (nil while loading)
+    @State private var isLoading: Bool = false    // Loading state for better UX
+    @State private var hasAppeared: Bool = false  // Track if view has appeared (lazy loading)
     @State private var loadingTask: Task<Void, Never>?  // Cancellable loading task
-    @State private var hasError: Bool = false      // Track if loading failed
-    @State private var currentPath: String = ""    // Track current path being loaded
+    @State private var hasError: Bool = false     // Track if loading failed
+    @State private var currentPath: String = ""   // Track current path being loaded
     
     // MARK: - Constants
     private static let loadingTimeout: TimeInterval = 10.0  // 10 second timeout for image loading
-    private static let memoryPressureThreshold = 256 * 1024 * 1024  // 256MB
-    fileprivate let PREVIEW_QOS: DispatchQoS.QoSClass = .userInitiated
     fileprivate let MEMORY_PRESSURE_THRESHOLD: UInt64 = 512 * 1024 * 1024
     
     // MARK: - Initializers
@@ -53,35 +51,25 @@ struct PreviewImage: View {
     var body: some View {
         ZStack {
             if let img = image, currentPath == path {
-                // Display loaded image with aspect ratio preservation
-                // Only show if it matches the current path
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFit()
             } else if hasError {
-                // Error state with retry option
                 errorPlaceholder
             } else if isLoading {
-                // Loading indicator while image is being processed
                 ProgressView()
                     .frame(width: min(32, maxDimension * 0.3), height: min(32, maxDimension * 0.3))
             } else {
-                // Placeholder for unloaded images - scales with image size
                 loadingPlaceholder
             }
         }
         // IMMEDIATE LOADING: Start loading immediately when path changes
         .onChange(of: path) { oldPath, newPath in
-            // Cancel any existing loading task immediately
             cancelLoading()
-            
-            // Reset state for new path
             if oldPath != newPath {
                 image = nil
                 hasError = false
                 currentPath = newPath
-                
-                // Start loading immediately
                 startLoading()
             }
         }
@@ -93,10 +81,8 @@ struct PreviewImage: View {
             }
         }
         .onDisappear {
-            // Cancel loading task when view disappears to save resources
             cancelLoading()
         }
-        // Accessibility support with filename as label
         .accessibilityLabel(Text((path as NSString).lastPathComponent))
     }
 
@@ -131,20 +117,15 @@ struct PreviewImage: View {
             )
     }
 
-    // MARK: - Cache Key Generation
-    /// Creates a unique cache identifier combining file path and size bucket
-    /// Bucketing ensures we don't cache multiple sizes of the same image unnecessarily
-    /// Example: "/path/to/image.jpg::320" for 320px bucket
+    // MARK: - Cache Key
     private var cacheKey: String {
         let bucket = ImageProcessingUtilities.cacheBucket(for: maxDimension)
         return "\(path)::\(bucket)"
     }
 
-    /// Thread-safe image setter that must run on main thread for UI updates
+    // MARK: - Main-actor state setters
     @MainActor private func setImage(_ img: NSImage?, forPath imagePath: String) {
-        // Only update if this is still the current path we're expecting
         guard imagePath == self.path else { return }
-        
         self.image = img
         self.isLoading = false
         self.hasError = (img == nil)
@@ -159,16 +140,13 @@ struct PreviewImage: View {
     
     @MainActor private func setLoading(_ loading: Bool) {
         self.isLoading = loading
-        if loading {
-            self.hasError = false
-        }
+        if loading { self.hasError = false }
     }
 
     // MARK: - Loading Management
     private func startLoading() {
         guard loadingTask == nil else { return }
-        
-        let pathToLoad = path // Capture current path
+        let pathToLoad = path
         loadingTask = Task(priority: priority) {
             await load(pathToLoad)
         }
@@ -184,70 +162,45 @@ struct PreviewImage: View {
         startLoading()
     }
 
-    // MARK: - Enhanced Async Image Loading Pipeline
-    /// Multi-stage loading process optimized for performance and memory efficiency
-    /// 1. Check cache for immediate display (main thread)
-    /// 2. Set loading state for better UX
-    /// 3. Decode image off-main thread to avoid blocking UI
-    /// 4. Create NSImage and update cache on main thread
-    /// ENHANCED: Added timeout, memory pressure monitoring, and better error handling
+    // MARK: - Async Image Loading Pipeline
     private func load(_ pathToLoad: String) async {
         let bucket = ImageProcessingUtilities.cacheBucket(for: maxDimension)
         let key = "\(pathToLoad)::\(bucket)" as NSString
 
-        // STAGE 1: Fast cache lookup on main thread
-        // If image is already cached, display immediately without any async work
+        // 1) Cache hit fast path
         if let cached = ImageCache.shared.object(forKey: key) {
             setImage(cached, forPath: pathToLoad)
             return
         }
 
-        // Early cancellation check
+        // 2) Early cancellation / state
         guard !Task.isCancelled, pathToLoad == self.path else { return }
-
-        // STAGE 2: Set loading state for better user experience
         setLoading(true)
 
-        // STAGE 3: Check memory pressure before proceeding
+        // 3) Memory pressure check
         if await isMemoryPressureHigh() {
             print("Warning: High memory pressure, skipping image load for \((pathToLoad as NSString).lastPathComponent)")
             setError()
             return
         }
 
-        // STAGE 4: Prepare for background processing
+        // 4) Decode off-main with timeout (via utility)
         let url = URL(fileURLWithPath: pathToLoad)
 
-        // STAGE 5: Decode image on background thread with timeout protection
-        let cg: CGImage? = await withTimeout(seconds: Self.loadingTimeout) {
-            await withCheckedContinuation { cont in
-                let _: () = DispatchQueue.global(qos: PREVIEW_QOS).async {
-                    autoreleasepool {
-                        // Check for cancellation before expensive operation
-                        guard !Task.isCancelled else {
-                            cont.resume(returning: nil)
-                            return
-                        }
-                        
-                        let result = ImageProcessingUtilities.downsampledCGImage(
-                            at: url,
-                            targetMaxDimension: CGFloat(bucket)
-                        )
-                        cont.resume(returning: result)
-                    }
-                }
-            }
-        }
+        let cg = await ImageProcessingUtilities.downsampledCGImageWithTimeout(
+            at: url,
+            targetMaxDimension: CGFloat(bucket),
+            timeout: Self.loadingTimeout
+        )
 
-        // STAGE 6: Final cancellation and path check
+        // 5) Final cancellation / state
         guard !Task.isCancelled, pathToLoad == self.path else {
-            setLoading(false)
+            await MainActor.run { self.isLoading = false }
             return
         }
 
-        // STAGE 7: Convert to NSImage and update cache on main thread
-        // NSImage creation and cache updates must happen on main thread
-        if let cg = cg {
+        // 6) Publish on main + cache
+        if let cg {
             await MainActor.run {
                 let ns = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
                 ImageCache.shared.setObject(ns, forKey: key)
@@ -259,10 +212,8 @@ struct PreviewImage: View {
     }
     
     // MARK: - Memory Pressure Monitoring
-    /// Checks if system is under memory pressure
-    /// Returns true if available memory is low
     private func isMemoryPressureHigh() async -> Bool {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 var info = mach_task_basic_info()
                 var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
@@ -271,61 +222,25 @@ struct PreviewImage: View {
                         task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
                     }
                 }
-                
                 if kerr == KERN_SUCCESS {
                     let isHighMemory = info.resident_size > MEMORY_PRESSURE_THRESHOLD
                     continuation.resume(returning: isHighMemory)
                 } else {
-                    // If we can't get memory info, assume we're fine
                     continuation.resume(returning: false)
                 }
             }
         }
     }
-    
-    // MARK: - Timeout Utility
-    /// Wraps an async operation with a timeout
-    /// Returns nil if the operation doesn't complete within the specified time
-    private func withTimeout<T: Sendable>(
-        seconds: TimeInterval,
-        operation: @escaping @Sendable () async -> T?
-    ) async -> T? {
-        return await withTaskGroup(of: T?.self) { group in
-            // Add the actual operation
-            group.addTask {
-                await operation()
-            }
-            
-            // Add a timeout task
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                return nil
-            }
-            
-            // Return the first result (either success or timeout)
-            let result = await group.next()
-            group.cancelAll()
-            return result ?? nil
-        }
-    }
 }
 
 // MARK: - TaskPriority QoS Extension
-/// Maps TaskPriority to QoSClass for DispatchQueue compatibility
-/// ENHANCED: Added better fallback handling
 private extension TaskPriority {
     var qosClass: DispatchQoS.QoSClass {
-        // Use rawValue comparison to handle all cases including future ones
-        if self >= .high {
-            return .userInteractive
-        } else if self >= .userInitiated {
-            return .userInitiated
-        } else if self >= .medium {
-            return .default
-        } else if self >= .utility {
-            return .utility
-        } else {
-            return .background
-        }
+        if self >= .high { return .userInteractive }
+        else if self >= .userInitiated { return .userInitiated }
+        else if self >= .medium { return .default }
+        else if self >= .utility { return .utility }
+        else { return .background }
     }
 }
+
