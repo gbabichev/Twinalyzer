@@ -63,13 +63,18 @@ public enum ImageAnalyzer {
         inFolders roots: [URL],
         similarityThreshold: Double,
         topLevelOnly: Bool,
+        ignoredFolderName: String = "",
         progress: (@Sendable (Double) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
     ) {
         Task.detached(priority: .userInitiated) {
             // Determine which folders to scan based on user preferences
-            let subdirs = await foldersToScanAsync(from: roots, shouldCancel: shouldCancel)
+            let subdirs = await foldersToScanAsync(
+                from: roots,
+                ignoredFolderName: ignoredFolderName,
+                shouldCancel: shouldCancel
+            )
             guard shouldCancel?() != true else {
                 await MainActor.run { completion([]) }
                 return
@@ -220,6 +225,7 @@ public enum ImageAnalyzer {
         inFolders roots: [URL],
         similarityThreshold: Double,
         topLevelOnly: Bool,
+        ignoredFolderName: String = "",
         progress: (@Sendable (Double) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
@@ -233,6 +239,7 @@ public enum ImageAnalyzer {
                 roots: roots,
                 topLevelOnly: topLevelOnly,
                 maxDist: maxDist,
+                ignoredFolderName: ignoredFolderName,
                 progress: progress,
                 shouldCancel: shouldCancel
             )
@@ -261,11 +268,16 @@ public enum ImageAnalyzer {
         roots: [URL],
         topLevelOnly: Bool,
         maxDist: Int,
+        ignoredFolderName: String = "",
         progress: (@Sendable (Double) -> Void)?,
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [TableRow] {
         
-        let subdirs = await foldersToScanAsync(from: roots, shouldCancel: shouldCancel)
+        let subdirs = await foldersToScanAsync(
+            from: roots,
+            ignoredFolderName: ignoredFolderName,
+            shouldCancel: shouldCancel
+        )
         guard shouldCancel?() != true else { return [] }
         
         var allPairs: [TableRow] = []
@@ -520,6 +532,7 @@ public enum ImageAnalyzer {
     /// Async version with cancellation support
     private nonisolated static func foldersToScanAsync(
         from roots: [URL],
+        ignoredFolderName: String = "",
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [URL] {
         var out: [URL] = []
@@ -528,9 +541,19 @@ public enum ImageAnalyzer {
         for root in roots {
             if shouldCancel?() == true { break }
             
-            let subs = await recursiveSubdirectoriesExcludingRootsAsync(under: [root], shouldCancel: shouldCancel)
+            let subs = await recursiveSubdirectoriesExcludingRootsAndIgnoredAsync(
+                under: [root],
+                ignoredFolderName: ignoredFolderName,
+                shouldCancel: shouldCancel
+            )
             if subs.isEmpty {
-                out.append(root)
+                // Check if the root itself should be ignored
+                let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let rootName = root.lastPathComponent.lowercased()
+                
+                if ignoredName.isEmpty || rootName != ignoredName {
+                    out.append(root)
+                }
             } else {
                 out.append(contentsOf: subs)
             }
@@ -542,10 +565,109 @@ public enum ImageAnalyzer {
         return out.filter { seen.insert($0.standardizedFileURL).inserted }
     }
 
+    public nonisolated static func recursiveSubdirectoriesExcludingRootsAndIgnored(
+        under roots: [URL],
+        ignoredFolderName: String = ""
+    ) -> [URL] {
+        let fm = FileManager.default
+        var dirs: [URL] = []
+        dirs.reserveCapacity(256)
+        
+        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        for root in roots {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            if let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) {
+                // Use while loop instead of for-in to avoid iterator issues
+                while let element = enumerator.nextObject() {
+                    guard let url = element as? URL else { continue }
+                    if let r = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
+                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
+                        
+                        // FILTER: Skip folders with the ignored name (case-insensitive)
+                        let folderName = url.lastPathComponent.lowercased()
+                        if !ignoredName.isEmpty && folderName == ignoredName {
+                            // Skip this folder
+                            continue
+                        }
+                        
+                        dirs.append(url)
+                    }
+                }
+            }
+        }
+        return dirs
+    }
+
+    /// ENHANCED: Async version with chunked processing and ignored folder filtering
+    private nonisolated static func recursiveSubdirectoriesExcludingRootsAndIgnoredAsync(
+        under roots: [URL],
+        ignoredFolderName: String = "",
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [URL] {
+        var dirs: [URL] = []
+        dirs.reserveCapacity(256)
+        
+        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for root in roots {
+            if shouldCancel?() == true { break }
+
+            // Build the URL list off-thread WITHOUT capturing a non-Sendable FileManager.
+            let allURLs: [URL] = await Task.detached(priority: .userInitiated) { [root, ignoredName] in
+                let fm = FileManager.default
+                guard let enumerator = fm.enumerator(
+                    at: root,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                ) else { return [] }
+
+                var urls: [URL] = []
+                // Use nextObject() loop (no Sequence/Iterator in async contexts)
+                while let element = enumerator.nextObject() as? URL {
+                    if let r = try? element.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
+                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
+                        
+                        // FILTER: Skip folders with the ignored name (case-insensitive)
+                        let folderName = element.lastPathComponent.lowercased()
+                        if !ignoredName.isEmpty && folderName == ignoredName {
+                            // Skip this folder
+                            continue
+                        }
+                        
+                        urls.append(element)
+                    }
+                }
+                return urls
+            }.value
+
+            var count = 0
+            for url in allURLs {
+                if shouldCancel?() == true { break }
+
+                count += 1
+                if count % 50 == 0 { await Task.yield() } // keep UI responsive
+
+                dirs.append(url)
+            }
+
+            await Task.yield() // yield after each root
+        }
+        return dirs
+    }
+    
+    
+    
+    
     /// Recursively discovers all subdirectories within given root directories
     /// Excludes hidden files and package contents for cleaner results
     /// Returns flattened list of all discovered subdirectories
-    public nonisolated static func recursiveSubdirectoriesExcludingRoots(under roots: [URL]) -> [URL] {
+    public nonisolated static func  recursiveSubdirectoriesExcludingRoots(under roots: [URL]) -> [URL] {
         let fm = FileManager.default
         var dirs: [URL] = []
         dirs.reserveCapacity(256)

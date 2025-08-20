@@ -12,6 +12,7 @@ import AppKit
 import Combine
 import ImageIO
 import UniformTypeIdentifiers
+
 // MARK: - Main Application State Manager
 /// Central view model managing all app state, analysis operations, and UI coordination
 /// Implements ObservableObject for SwiftUI reactive updates
@@ -40,6 +41,7 @@ final class AppViewModel: ObservableObject {
     @AppStorage("similarityThreshold") var similarityThreshold: Double = 0.7          // 0.0-1.0 similarity cutoff
     @AppStorage("selectedAnalysisMode") var selectedAnalysisMode: AnalysisMode = .deepFeature  // AI vs Hash analysis
     @AppStorage("scanTopLevelOnly") var scanTopLevelOnly: Bool = false // Limit to folder contents only
+    @AppStorage("ignoredFolderName") var ignoredFolderName: String = "thumb"
     @Published var isProcessing: Bool = false                 // Analysis in progress flag
     @Published var processingProgress: Double? = nil          // 0.0-1.0 or nil for indeterminate
     @Published var isDiscoveringFolders: Bool = false         // Folder discovery in progress flag (always indeterminate)
@@ -330,9 +332,13 @@ final class AppViewModel: ObservableObject {
     }
     
     /// Enhanced folder discovery with memory pressure monitoring and batch limiting
+    /// FIXED: Properly identify leaf folders and apply ignored folder filtering
     private func discoverFoldersWithLimits(from roots: [URL]) async -> [URL] {
         var discovered: [URL] = []
         discovered.reserveCapacity(Self.maxDiscoveryBatchSize)
+        
+        // Capture the ignored folder name
+        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         
         for root in roots {
             // Check for cancellation
@@ -344,11 +350,11 @@ final class AppViewModel: ObservableObject {
                 break
             }
             
-            // Process this root with chunking
-            let rootFolders = await discoverSingleRootWithChunking(root)
+            // Use the new leaf folder discovery logic
+            let leafFolders = await findLeafFoldersWithIgnoreFilter(root: root, ignoredName: ignoredName)
             
             // Add to results but respect batch size limit
-            for folder in rootFolders {
+            for folder in leafFolders {
                 if discovered.count >= Self.maxDiscoveryBatchSize {
                     break
                 }
@@ -366,66 +372,67 @@ final class AppViewModel: ObservableObject {
         return discovered
     }
     
-    /// Discover folders under a single root with chunked processing
-    private func discoverSingleRootWithChunking(_ root: URL) async -> [URL] {
-        let fm = FileManager.default
-        var folders: [URL] = []
-        
-        // Check if root is a directory
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-            return []
-        }
-        
-        // Process directories in chunks to avoid blocking
-        let (allURLs, maxBatchSize) = await Task.detached {
-            let batchLimit = 2000 // Local constant to avoid actor isolation issues
+    /// Find leaf folders (folders that contain images or have no subdirectories) while filtering ignored folders
+    private func findLeafFoldersWithIgnoreFilter(root: URL, ignoredName: String) async -> [URL] {
+        return await Task.detached {
+            let fm = FileManager.default
+            var leafFolders: [URL] = []
             
-            guard let enumerator = fm.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else { return ([URL](), batchLimit) }
-            
-            var urls: [URL] = []
-            let allElements = Array(enumerator.compactMap { $0 as? URL })
-            
-            for url in allElements {
-                if let resourceValues = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
-                   (resourceValues.isDirectory ?? false),
-                   !(resourceValues.isHidden ?? false) {
-                    urls.append(url)
+            // Recursive function to find leaf folders
+            func findLeafFolders(in directory: URL) {
+                // Skip if this directory itself should be ignored
+                let folderName = directory.lastPathComponent.lowercased()
+                if !ignoredName.isEmpty && folderName == ignoredName {
+                    return // Skip this entire subtree
                 }
                 
-                // Respect memory limits
-                if urls.count >= batchLimit {
-                    break
+                guard let contents = try? fm.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+                    options: [.skipsHiddenFiles]
+                ) else { return }
+                
+                // Separate subdirectories and files
+                var subdirectories: [URL] = []
+                var hasImageFiles = false
+                
+                for item in contents {
+                    if let resourceValues = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]) {
+                        if resourceValues.isDirectory == true {
+                            // Check if this subdirectory should be ignored
+                            let subfolderName = item.lastPathComponent.lowercased()
+                            if ignoredName.isEmpty || subfolderName != ignoredName {
+                                subdirectories.append(item)
+                            }
+                            // If it's ignored, don't add it to subdirectories
+                        } else if resourceValues.isRegularFile == true {
+                            // Check if this is an image file
+                            let ext = item.pathExtension.lowercased()
+                            let imageExtensions: Set<String> = ["jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"]
+                            if imageExtensions.contains(ext) {
+                                hasImageFiles = true
+                            }
+                        }
+                    }
+                }
+                
+                // Determine if this is a leaf folder
+                if subdirectories.isEmpty || hasImageFiles {
+                    // This is a leaf folder: either has no subdirectories, or has image files
+                    leafFolders.append(directory)
+                } else {
+                    // This is not a leaf folder, recurse into non-ignored subdirectories
+                    for subdir in subdirectories {
+                        findLeafFolders(in: subdir)
+                    }
                 }
             }
-            return (urls, batchLimit)
+            
+            // Start the recursive search
+            findLeafFolders(in: root)
+            
+            return leafFolders
         }.value
-        
-        // Process the URLs with yielding
-        var count = 0
-        for url in allURLs {
-            // Check for cancellation every chunk
-            if Task.isCancelled { break }
-            
-            // Yield control periodically
-            count += 1
-            if count % 100 == 0 { // Use literal instead of static property
-                await Task.yield()
-            }
-            
-            folders.append(url)
-            
-            // Respect memory limits
-            if folders.count >= maxBatchSize {
-                break
-            }
-        }
-        
-        return folders
     }
     
     /// Excludes a leaf folder from analysis without removing it from discovery
@@ -450,6 +457,7 @@ final class AppViewModel: ObservableObject {
         let leafFolders = activeLeafFolders
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
+        let ignoredFolder = ignoredFolderName  // Capture the ignored folder name
 
         // Enhanced progress wrapper with throttling
         let progressWrapper: @Sendable (Double) -> Void = { [weak self] p in
@@ -477,6 +485,7 @@ final class AppViewModel: ObservableObject {
                             inFolders: leafFolders,
                             similarityThreshold: threshold,
                             topLevelOnly: topOnly,
+                            ignoredFolderName: ignoredFolder,
                             progress: progressWrapper,
                             shouldCancel: { Task.isCancelled },
                             completion: { results in continuation.resume(returning: results) }
@@ -492,6 +501,7 @@ final class AppViewModel: ObservableObject {
                             inFolders: leafFolders,
                             similarityThreshold: threshold,
                             topLevelOnly: topOnly,
+                            ignoredFolderName: ignoredFolder,
                             progress: progressWrapper,
                             shouldCancel: { Task.isCancelled },
                             completion: { results in continuation.resume(returning: results) }
@@ -583,8 +593,6 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
-    
-    
     
     // MARK: - Selection Management for Menu Commands
     /// Tracks selected matches for deletion (shared between ContentView and menu commands)
@@ -735,7 +743,7 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// Properly escapes CSV fields (keep your existing version if already present)
+    /// Properly escapes CSV fields
     private static func escapeCSVField(_ field: String) -> String {
         if field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains("\r") {
             let escaped = field.replacingOccurrences(of: "\"", with: "\"\"")
@@ -743,5 +751,4 @@ final class AppViewModel: ObservableObject {
         }
         return field
     }
-    
 }

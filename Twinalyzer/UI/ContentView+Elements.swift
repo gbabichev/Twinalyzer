@@ -183,7 +183,7 @@ extension ContentView {
     
     // MARK: - Settings Panel
     /// Popover containing analysis configuration options
-    /// Includes scan depth, analysis method, and similarity threshold controls
+    /// Includes scan depth, analysis method, similarity threshold, and ignored folder controls
     var controlsPanelPopover: some View {
         VStack(alignment: .leading, spacing: 16) {
             
@@ -192,6 +192,57 @@ extension ContentView {
             
             // Scan depth control: top-level only vs recursive scanning
             Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
+            
+            Divider()
+            
+            // Ignored folder name input
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Ignored Folder Name")
+                        .font(.subheadline)
+                    Button(action: {}) {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Enter a folder name to skip during scanning. For example, entering 'thumb' will ignore all folders named 'thumb' at any level in the directory tree.")
+                }
+                
+                HStack {
+                    TextField("Enter folder name to ignore", text: Binding(
+                        get: { vm.ignoredFolderName },
+                        set: { newValue in
+                            // Defer the update to prevent publishing during view updates
+                            DispatchQueue.main.async {
+                                vm.ignoredFolderName = newValue
+                            }
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    
+                    // Clear button
+                    if !vm.ignoredFolderName.isEmpty {
+                        Button {
+                            DispatchQueue.main.async {
+                                vm.ignoredFolderName = ""
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear ignored folder name")
+                    }
+                }
+                
+                // Show current ignored folder if set
+                if !vm.ignoredFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Currently ignoring: '\(vm.ignoredFolderName.trimmingCharacters(in: .whitespacesAndNewlines))'")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             
             Divider()
             
@@ -249,6 +300,8 @@ extension ContentView {
         }
         .padding(20)
     }
+
+
     // MARK: - Cross-Folder Duplicates Panel
     /// Top section of detail view showing folder relationships
     /// Groups folders that contain duplicate images across different directories

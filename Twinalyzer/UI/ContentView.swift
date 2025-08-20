@@ -95,7 +95,7 @@ struct ContentView: View {
                     Label("Open Folder", systemImage: "folder")
                 }
                 .keyboardShortcut("o", modifiers: [.command])
-                .disabled(vm.isProcessing) // Disable during processing
+                .disabled(vm.isAnyOperationRunning) // Disable during processing
                 
                 Button {
                     clearAll()
@@ -103,7 +103,7 @@ struct ContentView: View {
                     Label("Clear Folders", systemImage: "arrow.counterclockwise")
                 }
                 .keyboardShortcut("l", modifiers: [.command])
-                .disabled(vm.selectedParentFolders.isEmpty || vm.isProcessing) // Disable during processing
+                .disabled(vm.selectedParentFolders.isEmpty || vm.isAnyOperationRunning) // Disable during processing
                 .help("Clear all selected folders")
                 
                 Button {
@@ -114,7 +114,7 @@ struct ContentView: View {
                 .popover(isPresented: $showSettingsPopover) {
                     controlsPanelPopover
                 }
-                .disabled(vm.isProcessing) // Disable during processing
+                .disabled(vm.isAnyOperationRunning) // Disable during processing
             }
             
             // CENTER: Title describing the app
@@ -136,7 +136,7 @@ struct ContentView: View {
                         }
                     }
                     .help("Clear selection (\(vm.selectedMatchesForDeletion.count) item\(vm.selectedMatchesForDeletion.count == 1 ? "" : "s"))")
-                    .disabled(vm.isProcessing) // Disable during processing
+                    .disabled(vm.isAnyOperationRunning) // Disable during processing
                 }
                 
                 // Delete selected button - shows count and allows batch deletion
@@ -153,7 +153,7 @@ struct ContentView: View {
                     }
                     .keyboardShortcut(.delete, modifiers: [])
                     .help("Delete \(vm.selectedMatchesForDeletion.count) selected match\(vm.selectedMatchesForDeletion.count == 1 ? "" : "es")")
-                    .disabled(vm.isProcessing) // Disable during processing
+                    .disabled(vm.isAnyOperationRunning) // Disable during processing
                 }
                 
                 // Processing state: Show cancel button during analysis
