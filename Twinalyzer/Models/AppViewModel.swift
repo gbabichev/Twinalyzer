@@ -272,6 +272,10 @@ final class AppViewModel: ObservableObject {
     func addParentFolders(_ urls: [URL]) {
         let newParents = FileSystemHelpers.filterDirectories(from: urls)
         let uniqueNewParents = FileSystemHelpers.uniqueURLs(from: newParents, existingURLs: selectedParentFolders)
+        
+        // Only proceed if we have new unique folders
+        guard !uniqueNewParents.isEmpty else { return }
+        
         selectedParentFolders.append(contentsOf: uniqueNewParents)
         
         // Trigger async folder discovery using existing progress system
@@ -454,6 +458,34 @@ final class AppViewModel: ObservableObject {
     /// Computed property to check if any matches are selected for deletion
     var hasSelectedMatches: Bool {
         !selectedMatchesForDeletion.isEmpty
+    }
+    
+    /// IMPROVED: Non-published method to handle selection toggle
+    /// This prevents the "Publishing changes from within view updates" warning
+    func toggleSelection(for rowIDs: Set<String>) {
+        if rowIDs.count > 1 {
+            // Check if all selected rows are already checked for deletion
+            let allChecked = rowIDs.allSatisfy { selectedMatchesForDeletion.contains($0) }
+            
+            if allChecked {
+                // If all are checked, uncheck all
+                for rowID in rowIDs {
+                    selectedMatchesForDeletion.remove(rowID)
+                }
+            } else {
+                // If some/none are checked, check all
+                for rowID in rowIDs {
+                    selectedMatchesForDeletion.insert(rowID)
+                }
+            }
+        } else if let focusedID = rowIDs.first {
+            // Single row selection: simple toggle
+            if selectedMatchesForDeletion.contains(focusedID) {
+                selectedMatchesForDeletion.remove(focusedID)
+            } else {
+                selectedMatchesForDeletion.insert(focusedID)
+            }
+        }
     }
     
     /// Deletes currently selected matches (called from menu command)

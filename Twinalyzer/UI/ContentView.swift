@@ -178,35 +178,13 @@ struct ContentView: View {
         .onKeyPress(.space) {
             guard !tableSelection.isEmpty else { return .handled }
             
-            // Handle multiple row selection: toggle all selected rows consistently
-            if tableSelection.count > 1 {
-                // Check if all selected rows are already checked for deletion
-                let allChecked = tableSelection.allSatisfy { vm.selectedMatchesForDeletion.contains($0) }
-                
-                if allChecked {
-                    // If all are checked, uncheck all
-                    for rowID in tableSelection {
-                        vm.selectedMatchesForDeletion.remove(rowID)
-                    }
-                } else {
-                    // If some/none are checked, check all
-                    for rowID in tableSelection {
-                        vm.selectedMatchesForDeletion.insert(rowID)
-                    }
-                }
-            } else {
-                // Single row selection: simple toggle
-                guard let focusedID = tableSelection.first else { return .handled }
-                
-                if vm.selectedMatchesForDeletion.contains(focusedID) {
-                    vm.selectedMatchesForDeletion.remove(focusedID)
-                } else {
-                    vm.selectedMatchesForDeletion.insert(focusedID)
-                }
+            // Defer the selection change to avoid "Publishing changes from within view updates"
+            DispatchQueue.main.async {
+                vm.toggleSelection(for: tableSelection)
             }
+            
             return .handled
-        }
-        // MARK: - Drag and Drop Support
+        }       // MARK: - Drag and Drop Support
         // Allow users to drag folders directly onto the app window
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             Task {
