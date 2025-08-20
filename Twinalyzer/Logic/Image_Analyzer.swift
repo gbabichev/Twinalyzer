@@ -27,7 +27,7 @@ public enum ImageAnalyzer {
 
     // MARK: - Progress Tracking Utilities
     /// Throttled progress reporting to avoid overwhelming the UI with updates
-    /// Only reports progress every 10 items or at completion to maintain performance
+    /// Only reports progress every 5 items or at completion to maintain performance
     private nonisolated static func updateProgress(
         _ current: Int,
         _ total: Int,
@@ -36,9 +36,8 @@ public enum ImageAnalyzer {
         guard let callback, total > 0 else { return }
         let progress = Double(current) / Double(total)
         
-        // Simple throttling - only update every 10 items or at 100%
-        // This prevents UI thread saturation during large batch processing
-        if current % 10 == 0 || current == total {
+        // More frequent updates - report every 5 items or at completion
+        if current % 5 == 0 || current == total {
             Task { @MainActor in
                 callback(progress)
             }
@@ -121,7 +120,6 @@ public enum ImageAnalyzer {
         var paths: [String] = []
         
         // Extract Vision framework feature vectors from each image
-        // This is the computationally expensive step
         for (index, url) in files.enumerated() {
             if shouldCancel?() == true { break }
             
@@ -210,6 +208,7 @@ public enum ImageAnalyzer {
     
     /// Computes perceptual hash pairs for similarity comparison
     /// Generates hash for each image then compares all pairs within distance threshold
+    /// ENHANCED: Now includes proper progress reporting at the image level
     private nonisolated static func computeHashPairs(
         roots: [URL],
         topLevelOnly: Bool,
@@ -231,33 +230,58 @@ public enum ImageAnalyzer {
                 if shouldCancel?() == true { break }
                 
                 let files = topLevelImageFiles(in: dir)
-                let pairs = hashAndCompare(files: files, maxDist: maxDist)
+                let pairs = hashAndCompareWithProgress(
+                    files: files,
+                    maxDist: maxDist,
+                    processedSoFar: totalProcessed,
+                    totalCount: totalCount,
+                    progress: progress,
+                    shouldCancel: shouldCancel
+                )
                 allPairs.append(contentsOf: pairs)
                 
                 totalProcessed += files.count
-                updateProgress(totalProcessed, totalCount, progress)
             }
         } else {
             // Process all files together for cross-folder comparison
             let allFiles = subdirs.flatMap { allImageFiles(in: $0) }
-            allPairs = hashAndCompare(files: allFiles, maxDist: maxDist)
-            updateProgress(allFiles.count, allFiles.count, progress)
+            allPairs = hashAndCompareWithProgress(
+                files: allFiles,
+                maxDist: maxDist,
+                processedSoFar: 0,
+                totalCount: allFiles.count,
+                progress: progress,
+                shouldCancel: shouldCancel
+            )
         }
         
         // Return pairs sorted by similarity percentage (highest first)
         return allPairs.sorted { $0.percent > $1.percent }
     }
     
-    /// Core hash comparison algorithm using block hash and Hamming distance
-    /// O(n²) comparison of all image pairs - efficient for perceptual hashes
-    private nonisolated static func hashAndCompare(files: [URL], maxDist: Int) -> [TableRow] {
+    /// Enhanced hash comparison with proper progress reporting
+    /// ENHANCED: Now reports progress for each image processed, not just at the end
+    private nonisolated static func hashAndCompareWithProgress(
+        files: [URL],
+        maxDist: Int,
+        processedSoFar: Int,
+        totalCount: Int,
+        progress: (@Sendable (Double) -> Void)?,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) -> [TableRow] {
         var hashes: [(path: String, hash: UInt64)] = []
         
-        // Generate perceptual hash for each image
-        for file in files {
+        // Generate perceptual hash for each image WITH PROGRESS REPORTING
+        for (index, file) in files.enumerated() {
+            if shouldCancel?() == true { break }
+            
             if let hash = blockHash(for: file) {
                 hashes.append((path: file.path, hash: hash))
             }
+            
+            // Report progress for each image processed
+            let currentTotal = processedSoFar + index + 1
+            updateProgress(currentTotal, totalCount, progress)
         }
         
         // Compare all pairs and find those within distance threshold
@@ -276,6 +300,20 @@ public enum ImageAnalyzer {
             }
         }
         return pairs
+    }
+    
+    /// Core hash comparison algorithm using block hash and Hamming distance
+    /// O(n²) comparison of all image pairs - efficient for perceptual hashes
+    /// Legacy wrapper for backward compatibility
+    private nonisolated static func hashAndCompare(files: [URL], maxDist: Int) -> [TableRow] {
+        return hashAndCompareWithProgress(
+            files: files,
+            maxDist: maxDist,
+            processedSoFar: 0,
+            totalCount: files.count,
+            progress: nil,
+            shouldCancel: nil
+        )
     }
     
     /// Groups flat pairs into hierarchical results structure for UI display

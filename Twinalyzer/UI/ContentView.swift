@@ -62,7 +62,7 @@ struct ContentView: View {
     //MARK: - Main UI
     var body: some View {
         Group {
-            if vm.isProcessing {
+            if vm.isAnyOperationRunning {
                 processingView
             } else {
                 NavigationSplitView {

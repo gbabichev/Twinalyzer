@@ -26,11 +26,13 @@ final class AppViewModel: ObservableObject {
     
     @Published var selectedParentFolders: [URL] = []          // User-selected root directories
     @Published var excludedLeafFolders: Set<URL> = []         // Folders user has manually removed
+    @Published var discoveredLeafFolders: [URL] = []          // CHANGED: Now stored property instead of computed
     @AppStorage("similarityThreshold") var similarityThreshold: Double = 0.7          // 0.0-1.0 similarity cutoff
     @AppStorage("selectedAnalysisMode") var selectedAnalysisMode: AnalysisMode = .deepFeature  // AI vs Hash analysis
     @AppStorage("scanTopLevelOnly") var scanTopLevelOnly: Bool = false // Limit to folder contents only
     @Published var isProcessing: Bool = false                 // Analysis in progress flag
     @Published var processingProgress: Double? = nil          // 0.0-1.0 or nil for indeterminate
+    @Published var isDiscoveringFolders: Bool = false         // Folder discovery in progress flag (always indeterminate)
     @Published var comparisonResults: [ImageComparisonResult] = [] {  // Analysis results
         didSet {
             // PERFORMANCE OPTIMIZATION: Invalidate all cached values when results change
@@ -53,16 +55,11 @@ final class AppViewModel: ObservableObject {
     // MARK: - Task Management
     /// Simple cancellation mechanism for long-running analysis operations
     private var analysisTask: Task<Void, Never>?
+    private var discoveryTask: Task<Void, Never>?  // NEW: Track folder discovery task
     
     // MARK: - Computed Properties (Non-Cached - These are lightweight)
     /// These properties derive their values from simple state and remain uncached
     /// They don't cause performance issues during selection changes
-    
-    /// All leaf folders discovered from parent selections (matches analysis engine behavior)
-    /// Uses same logic as ImageAnalyzer.foldersToScan for consistency
-    var discoveredLeafFolders: [URL] {
-        ImageAnalyzer.foldersToScan(from: selectedParentFolders)
-    }
     
     /// Folders that will actually be analyzed (after user exclusions)
     /// This is the final list passed to the analysis engine
@@ -75,9 +72,20 @@ final class AppViewModel: ObservableObject {
         activeLeafFolders.map { $0.lastPathComponent }.joined(separator: "\n")
     }
     
+    /// Computed property to check if any operation is running
+    var isAnyOperationRunning: Bool {
+        isProcessing || isDiscoveringFolders
+    }
+    
     /// Sorted list of folders currently being processed (for progress display)
     var allFoldersBeingProcessed: [URL] {
-        activeLeafFolders.sorted { $0.path < $1.path }
+        if isDiscoveringFolders {
+            // During discovery, show parent folders being scanned
+            return selectedParentFolders.sorted { $0.path < $1.path }
+        } else {
+            // During analysis, show leaf folders being processed
+            return activeLeafFolders.sorted { $0.path < $1.path }
+        }
     }
     
     // MARK: - Cached Computed Properties (PERFORMANCE OPTIMIZED)
@@ -260,10 +268,45 @@ final class AppViewModel: ObservableObject {
     
     /// Adds new parent folders while filtering and deduplicating
     /// Only directories are accepted, and duplicates are automatically excluded
+    /// NEW: Now triggers async folder discovery instead of immediate computation
     func addParentFolders(_ urls: [URL]) {
         let newParents = FileSystemHelpers.filterDirectories(from: urls)
         let uniqueNewParents = FileSystemHelpers.uniqueURLs(from: newParents, existingURLs: selectedParentFolders)
         selectedParentFolders.append(contentsOf: uniqueNewParents)
+        
+        // Trigger async folder discovery using existing progress system
+        discoverFoldersAsync()
+    }
+    
+    /// NEW: Async folder discovery that reuses the existing progress UI system
+    private func discoverFoldersAsync() {
+        guard !selectedParentFolders.isEmpty else { return }
+        guard !isAnyOperationRunning else { return } // Don't start if already processing
+        
+        // Cancel any existing discovery
+        discoveryTask?.cancel()
+        
+        // Use separate discovery state (always indeterminate)
+        isDiscoveringFolders = true
+        
+        // Capture the folders on the main actor before going to background
+        let foldersToScan = selectedParentFolders
+        
+        discoveryTask = Task {
+            // Do the heavy work off the main thread
+            let discovered = await Task.detached(priority: .userInitiated) {
+                ImageAnalyzer.foldersToScan(from: foldersToScan)
+            }.value
+            
+            // Update on main thread if not cancelled
+            await MainActor.run {
+                if !Task.isCancelled {
+                    self.discoveredLeafFolders = discovered
+                }
+                self.isDiscoveringFolders = false
+                self.discoveryTask = nil
+            }
+        }
     }
     
     /// Excludes a leaf folder from analysis without removing it from discovery
@@ -277,12 +320,12 @@ final class AppViewModel: ObservableObject {
     /// Manages progress tracking, cancellation, and result processing
     /// Prevents multiple concurrent analyses and provides progress callbacks
     func processImages(progress: @escaping @Sendable (Double) -> Void) {
-        guard !isProcessing else { return }
+        guard !isAnyOperationRunning else { return }
         
-        // Cancel any existing analysis and set up new operation
-        analysisTask?.cancel()
+        // Cancel any existing operations and set up new operation
+        cancelAllOperations()
         isProcessing = true
-        processingProgress = nil
+        processingProgress = 0.0  // Start at 0% for immediate progress bar
 
         // Capture current settings for the analysis task
         let leafFolders = activeLeafFolders
@@ -340,16 +383,26 @@ final class AppViewModel: ObservableObject {
                 }
                 self.processingProgress = nil
                 self.isProcessing = false
+                self.analysisTask = nil
             }
         }
     }
 
     /// Cancels the current analysis operation and resets processing state
+    /// NEW: Enhanced to handle both analysis and discovery cancellation
     func cancelAnalysis() {
+        cancelAllOperations()
+        isProcessing = false
+        isDiscoveringFolders = false
+        processingProgress = nil
+    }
+    
+    /// NEW: Cancel all background operations
+    private func cancelAllOperations() {
         analysisTask?.cancel()
         analysisTask = nil
-        isProcessing = false
-        processingProgress = nil
+        discoveryTask?.cancel()
+        discoveryTask = nil
     }
 
     // MARK: - File System Operations
@@ -419,12 +472,18 @@ final class AppViewModel: ObservableObject {
     /// Comprehensive reset of all application state
     /// Cancels ongoing operations and clears all user selections and results
     func clearAll() {
-        // Cancel any running analysis first
-        cancelAnalysis()
+        // Cancel any running operations first
+        cancelAllOperations()
+        isProcessing = false
+        isDiscoveringFolders = false
+        processingProgress = nil
         
         // Clear selected folders and exclusions
         selectedParentFolders.removeAll()
         excludedLeafFolders.removeAll()
+        
+        // Clear discovered folders
+        discoveredLeafFolders.removeAll()
         
         // Clear selection state
         selectedMatchesForDeletion.removeAll()

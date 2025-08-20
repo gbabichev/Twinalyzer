@@ -13,22 +13,35 @@ import AppKit
 extension ContentView {
     
     // MARK: - Processing View
-    /// Full-screen view displayed during image analysis
-    /// Shows progress bar, percentage, and list of folders being processed
+    /// Full-screen view displayed during image analysis OR folder discovery
+    /// Shows progress bar for analysis, spinner for discovery
+    /// ENHANCED: Now properly handles both states with appropriate progress indicators
     var processingView: some View {
         VStack(spacing: 16) {
-            // Progress indicator - determinate if progress available, indeterminate otherwise
-            if let p = vm.processingProgress {
-                ProgressView(value: p).frame(width: 320)
-                Text(DisplayHelpers.formatProcessingProgress(p)).foregroundStyle(.secondary)
-            } else {
-                ProgressView().frame(width: 320)
-                Text(DisplayHelpers.formatProcessingProgress(nil)).foregroundStyle(.secondary)
+            if vm.isDiscoveringFolders {
+                // FOLDER DISCOVERY: Always indeterminate spinner
+                ProgressView()
+                    .frame(width: 320)
+                Text("Discovering folders...")
+                    .foregroundStyle(.secondary)
+            } else if vm.isProcessing {
+                // IMAGE ANALYSIS: Progress bar (determinate) or spinner (indeterminate)
+                if let p = vm.processingProgress {
+                    ProgressView(value: p)
+                        .frame(width: 320)
+                    Text(DisplayHelpers.formatProcessingProgress(p))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ProgressView()
+                        .frame(width: 320)
+                    Text("Preparing analysis...")
+                        .foregroundStyle(.secondary)
+                }
             }
             
-            // List of folders currently being analyzed
+            // List of folders currently being processed
             VStack(alignment: .leading, spacing: 6) {
-                Text("Processing Folders...")
+                Text(vm.isDiscoveringFolders ? "Scanning Parent Folders..." : "Processing Folders...")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if vm.allFoldersBeingProcessed.isEmpty {
