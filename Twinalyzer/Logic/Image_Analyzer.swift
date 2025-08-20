@@ -85,7 +85,12 @@ public enum ImageAnalyzer {
             if topLevelOnly {
                 // Process each folder separately to maintain folder boundaries
                 var totalProcessed = 0
-                let allFiles = await getAllFilesAsync(from: subdirs, topLevelOnly: true, shouldCancel: shouldCancel)
+                let allFiles = await getAllFilesAsync(
+                    from: subdirs,
+                    topLevelOnly: true,
+                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                    shouldCancel: shouldCancel
+                )
                 let totalCount = allFiles.count
                 
                 // Limit batch size to prevent memory issues
@@ -97,7 +102,11 @@ public enum ImageAnalyzer {
                 for dir in subdirs {
                     if shouldCancel?() == true { break }
                     
-                    let files = await topLevelImageFilesAsync(in: dir, shouldCancel: shouldCancel)
+                    let files = await topLevelImageFilesAsync(
+                        in: dir,
+                        ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                        shouldCancel: shouldCancel
+                    )
                     let folderResults = await processImageBatch(
                         files: files,
                         threshold: similarityThreshold,
@@ -112,7 +121,12 @@ public enum ImageAnalyzer {
                 }
             } else {
                 // Process all images together for cross-folder duplicate detection
-                let allFiles = await getAllFilesAsync(from: subdirs, topLevelOnly: false, shouldCancel: shouldCancel)
+                let allFiles = await getAllFilesAsync(
+                    from: subdirs,
+                    topLevelOnly: false,
+                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                    shouldCancel: shouldCancel
+                )
                 
                 // Limit batch size to prevent memory issues
                 let limitedFiles = Array(allFiles.prefix(maxBatchSize))
@@ -285,13 +299,22 @@ public enum ImageAnalyzer {
         if topLevelOnly {
             // Process folders separately for folder-specific analysis
             var totalProcessed = 0
-            let allFiles = await getAllFilesAsync(from: subdirs, topLevelOnly: true, shouldCancel: shouldCancel)
+            let allFiles = await getAllFilesAsync(
+                from: subdirs,
+                topLevelOnly: true,
+                ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                shouldCancel: shouldCancel
+            )
             let totalCount = min(allFiles.count, maxBatchSize) // Limit processing
             
             for dir in subdirs {
                 if shouldCancel?() == true { break }
                 
-                let files = await topLevelImageFilesAsync(in: dir, shouldCancel: shouldCancel)
+                let files = await topLevelImageFilesAsync(
+                    in: dir,
+                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                    shouldCancel: shouldCancel
+                )
                 let pairs = await hashAndCompareWithProgress(
                     files: files,
                     maxDist: maxDist,
@@ -306,7 +329,12 @@ public enum ImageAnalyzer {
             }
         } else {
             // Process all files together for cross-folder comparison
-            let allFiles = await getAllFilesAsync(from: subdirs, topLevelOnly: false, shouldCancel: shouldCancel)
+            let allFiles = await getAllFilesAsync(
+                from: subdirs,
+                topLevelOnly: false,
+                ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                shouldCancel: shouldCancel
+            )
             let limitedFiles = Array(allFiles.prefix(maxBatchSize)) // Limit to prevent memory issues
             
             if limitedFiles.count < allFiles.count {
@@ -661,9 +689,6 @@ public enum ImageAnalyzer {
         return dirs
     }
     
-    
-    
-    
     /// Recursively discovers all subdirectories within given root directories
     /// Excludes hidden files and package contents for cleaner results
     /// Returns flattened list of all discovered subdirectories
@@ -741,48 +766,84 @@ public enum ImageAnalyzer {
     // MARK: - Enhanced File Discovery and Filtering
     /// Recursively finds all image files within a directory tree
     /// Filters by supported image extensions and excludes hidden files
+    /// FIXED: Now properly handles ignored folder filtering during file collection
     public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
+        return allImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: "")
+    }
+    
+    /// FIXED: New method that properly filters ignored folders during file discovery
+    public nonisolated static func allImageFilesWithIgnoredFilter(
+        in directory: URL,
+        ignoredFolderName: String
+    ) -> [URL] {
         var results: [URL] = []
         let fm = FileManager.default
-        if let enumerator = fm.enumerator(at: directory,
-                                         includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
-                                         options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
-            // Use while loop instead of for-in to avoid iterator issues
+        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if let enumerator = fm.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isHiddenKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) {
             while let element = enumerator.nextObject() {
                 guard let url = element as? URL else { continue }
+                
+                // Check if this is in an ignored folder path
+                if !ignoredName.isEmpty {
+                    let pathComponents = url.pathComponents
+                    let containsIgnoredFolder = pathComponents.contains { component in
+                        component.lowercased() == ignoredName
+                    }
+                    if containsIgnoredFolder {
+                        continue // Skip files in ignored folders
+                    }
+                }
+                
                 guard let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
                       (rv.isRegularFile ?? false),
                       !(rv.isHidden ?? false),
                       allowedImageExtensions.contains(url.pathExtension.lowercased())
                 else { continue }
+                
                 results.append(url)
             }
         }
         return results
     }
     
-    /// ENHANCED: Async version with chunked processing
-    /// ENHANCED: Async version with chunked processing
+    /// ENHANCED: Async version with chunked processing and ignored folder filtering
     private nonisolated static func allImageFilesAsync(
         in directory: URL,
+        ignoredFolderName: String = "",  // FIXED: Added parameter
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [URL] {
         var results: [URL] = []
         let fm = FileManager.default
+        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let e = fm.enumerator(
             at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isHiddenKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) {
             var count = 0
-            // IMPORTANT: nextObject() to avoid `makeIterator()` in async context
             while let element = e.nextObject() {
                 if shouldCancel?() == true { break }
                 guard let url = element as? URL else { continue }
 
                 count += 1
                 if count % fileSystemChunkSize == 0 { await Task.yield() }
+
+                // FIXED: Check if this file is in an ignored folder path
+                if !ignoredName.isEmpty {
+                    let pathComponents = url.pathComponents
+                    let containsIgnoredFolder = pathComponents.contains { component in
+                        component.lowercased() == ignoredName
+                    }
+                    if containsIgnoredFolder {
+                        continue // Skip files in ignored folders
+                    }
+                }
 
                 guard
                     let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
@@ -797,17 +858,36 @@ public enum ImageAnalyzer {
         return results
     }
 
-
     /// Finds image files only in the top level of a directory (non-recursive)
-    /// Used when user wants to limit scanning to specific folder levels
+    /// FIXED: Now properly handles ignored folder filtering
     public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
+        return topLevelImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: "")
+    }
+    
+    /// FIXED: New method that properly filters ignored subfolders during top-level scanning
+    public nonisolated static func topLevelImageFilesWithIgnoredFilter(
+        in directory: URL,
+        ignoredFolderName: String
+    ) -> [URL] {
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(at: directory,
-                                                         includingPropertiesForKeys: [.isRegularFileKey],
-                                                         options: [.skipsHiddenFiles]) else { return [] }
+        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard let contents = try? fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
         
         var results: [URL] = []
         for url in contents {
+            // FIXED: Skip if this is an ignored folder name (for top-level scan)
+            if !ignoredName.isEmpty {
+                let fileName = url.lastPathComponent.lowercased()
+                if fileName == ignoredName {
+                    continue // Skip files/folders with ignored name
+                }
+            }
+            
             if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true &&
                allowedImageExtensions.contains(url.pathExtension.lowercased()) {
                 results.append(url)
@@ -816,28 +896,23 @@ public enum ImageAnalyzer {
         return results
     }
     
-    /// ENHANCED: Async version
+    /// ENHANCED: Async version with ignored folder filtering
     private nonisolated static func topLevelImageFilesAsync(
         in directory: URL,
+        ignoredFolderName: String = "",  // FIXED: Added parameter
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [URL] {
         if shouldCancel?() == true { return [] }
         
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(at: directory,
-                                                         includingPropertiesForKeys: [.isRegularFileKey],
-                                                         options: [.skipsHiddenFiles]) else { return [] }
-        
-        return contents.filter {
-            (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true &&
-            allowedImageExtensions.contains($0.pathExtension.lowercased())
-        }
+        return topLevelImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: ignoredFolderName)
     }
     
     /// Helper to get all files from multiple directories
+    /// FIXED: Now properly passes through ignored folder filtering
     private nonisolated static func getAllFilesAsync(
         from directories: [URL],
         topLevelOnly: Bool,
+        ignoredFolderName: String = "",  // FIXED: Added parameter
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [URL] {
         var allFiles: [URL] = []
@@ -846,8 +921,16 @@ public enum ImageAnalyzer {
             if shouldCancel?() == true { break }
             
             let files = topLevelOnly
-                ? await topLevelImageFilesAsync(in: dir, shouldCancel: shouldCancel)
-                : await allImageFilesAsync(in: dir, shouldCancel: shouldCancel)
+                ? await topLevelImageFilesAsync(
+                    in: dir,
+                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass through
+                    shouldCancel: shouldCancel
+                )
+                : await allImageFilesAsync(
+                    in: dir,
+                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass through
+                    shouldCancel: shouldCancel
+                )
             
             allFiles.append(contentsOf: files)
             await Task.yield()
