@@ -35,13 +35,7 @@ struct ContentView: View {
     /// Returns the table rows sorted according to user preferences
     /// If no sort order is specified, returns rows in their natural order from the view model
     var sortedRows: [TableRow] {
-        // Use pre-sorted results if no custom sort order is applied
-        if sortOrder.isEmpty {
-            return vm.flattenedResultsSorted
-        } else {
-            // Apply custom sort order when user has manually sorted columns
-            return vm.flattenedResults.sorted(using: sortOrder)
-        }
+        return vm.getSortedRows(using: sortOrder)
     }
     
     /// Returns the currently focused/selected row for preview display
@@ -174,7 +168,7 @@ struct ContentView: View {
                     } label: {
                         Label("Analyze", systemImage: "wand.and.stars")
                     }
-                    .keyboardShortcut("a", modifiers: [.command])
+                    .keyboardShortcut("p", modifiers: [.command])
                     .disabled(vm.activeLeafFolders.isEmpty)
                 }
             }

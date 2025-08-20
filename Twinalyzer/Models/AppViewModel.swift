@@ -48,16 +48,7 @@ final class AppViewModel: ObservableObject {
     private var _folderClustersCache: [[String]]?
     private var _crossFolderDuplicateCountsCache: [String: Int]?
     private var _flattenedResultsSortedCache: [TableRow]?
-    
-    /// Invalidates all cached computations - called when source data changes
-    private func invalidateAllCaches() {
-        _flattenedResultsCache = nil
-        _folderDuplicateCountsCache = nil
-        _representativeImageByFolderCache = nil
-        _folderClustersCache = nil
-        _crossFolderDuplicateCountsCache = nil
-        _flattenedResultsSortedCache = nil
-    }
+    private var _sortedResultsCache: [String: [TableRow]] = [:]
     
     // MARK: - Task Management
     /// Simple cancellation mechanism for long-running analysis operations
@@ -215,6 +206,54 @@ final class AppViewModel: ObservableObject {
         let result = flattenedResults.sorted { $0.percent > $1.percent }
         _flattenedResultsSortedCache = result
         return result
+    }
+    
+    /// Generates a cache key for a given sort order
+    private func sortCacheKey(for sortOrder: [KeyPathComparator<TableRow>]) -> String {
+        if sortOrder.isEmpty {
+            return "default"
+        }
+        
+        // Create a unique key based on sort criteria
+        return sortOrder.map { comparator in
+            let keyPath = String(describing: comparator.keyPath)
+            let order = comparator.order == .forward ? "asc" : "desc"
+            return "\(keyPath)_\(order)"
+        }.joined(separator: "|")
+    }
+
+    /// Enhanced sorted rows with caching for performance
+    func getSortedRows(using sortOrder: [KeyPathComparator<TableRow>]) -> [TableRow] {
+        let cacheKey = sortCacheKey(for: sortOrder)
+        
+        // Check cache first
+        if let cached = _sortedResultsCache[cacheKey] {
+            return cached
+        }
+        
+        // Compute and cache the result
+        let sorted: [TableRow]
+        if sortOrder.isEmpty {
+            sorted = flattenedResultsSorted // Use our pre-cached default sort
+        } else {
+            sorted = flattenedResults.sorted(using: sortOrder)
+        }
+        
+        _sortedResultsCache[cacheKey] = sorted
+        return sorted
+    }
+
+    /// Enhanced cache invalidation that also clears sort cache
+    private func invalidateAllCaches() {
+        _flattenedResultsCache = nil
+        _folderDuplicateCountsCache = nil
+        _representativeImageByFolderCache = nil
+        _folderClustersCache = nil
+        _crossFolderDuplicateCountsCache = nil
+        _flattenedResultsSortedCache = nil
+        
+        // Clear sort cache when data changes
+        _sortedResultsCache.removeAll()
     }
     
     // MARK: - User Actions
