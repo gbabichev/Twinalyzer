@@ -22,12 +22,22 @@ struct TwinalyzerApp: App {
         .commands {
             ActionsCommands(viewModel: appViewModel)
         }
+    
+        // MARK: - Custom About Window
+        Window("About Thumbnailer", id: "AboutWindow") {
+            AboutView()
+                .frame(width: 400, height: 400)
+        }
+        .windowResizability(.contentSize) // Makes window non-resizable and size == content
+        .defaultSize(width: 400, height: 400)
+        .windowStyle(.hiddenTitleBar)
+        
     }
 }
 
 struct ActionsCommands: Commands {
     @ObservedObject var viewModel: AppViewModel
-    
+    @Environment(\.openWindow) private var openWindow
     var body: some Commands {
         CommandMenu("Actions") {
             if viewModel.isProcessing {
@@ -48,6 +58,12 @@ struct ActionsCommands: Commands {
                 viewModel.clearAll()
             }
             .keyboardShortcut("l", modifiers: [.command])
+        }
+        
+        CommandGroup(replacing: .appInfo) {
+            Button("About Twinalyzer") {
+                openWindow(id: "AboutWindow")
+            }
         }
     }
 }
