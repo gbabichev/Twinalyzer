@@ -14,15 +14,12 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     
-    
     // MARK: - Scroll State Management
     @State var scrollOffset: CGFloat = 0
     @State var isScrollable: Bool = false
     @State var isScrolledToBottom: Bool = false
     @State var contentHeight: CGFloat = 0
     @State var visibleHeight: CGFloat = 200
-    
-    
     
     @EnvironmentObject var vm: AppViewModel
     @State var showSettingsPopover = false
@@ -133,7 +130,7 @@ struct ContentView: View {
                         vm.clearSelection()
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "xmark.circle")
+                            Image(systemName: "checkmark.circle.badge.xmark")
                             Text("Clear")
                                 .font(.caption)
                         }
@@ -224,6 +221,15 @@ struct ContentView: View {
         .onChange(of: tableSelection) { _, _ in
             handleSelectionChange()
         }
+        .fileExporter(
+            isPresented: $vm.isExportingCSV,
+            document: vm.csvDocument,
+            contentType: .commaSeparatedText,
+            defaultFilename: vm.exportFilename
+        ) { result in
+            vm.handleCSVExportResult(result)
+        }
+
     }
     
 }

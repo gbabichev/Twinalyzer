@@ -128,6 +128,5 @@ extension ContentView {
         } else {
             isScrolledToBottom = true // Non-scrollable content is considered "at bottom"
         }
-    }
-    
+    }    
 }

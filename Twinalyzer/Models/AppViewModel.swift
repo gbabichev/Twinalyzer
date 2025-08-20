@@ -11,7 +11,7 @@ import SwiftUI
 import AppKit
 import Combine
 import ImageIO
-
+import UniformTypeIdentifiers
 // MARK: - Main Application State Manager
 /// Central view model managing all app state, analysis operations, and UI coordination
 /// Implements ObservableObject for SwiftUI reactive updates
@@ -19,6 +19,11 @@ import ImageIO
 /// ENHANCED: Added memory pressure monitoring and batch size limiting to prevent beachballing
 @MainActor
 final class AppViewModel: ObservableObject {
+    
+    //MARK: - CSV
+    @Published var isExportingCSV = false
+    @Published var csvDocument: CSVDocument? = nil
+    @Published var exportFilename: String = "Results"
     
     // MARK: - Configuration Constants
     private nonisolated static let maxDiscoveryBatchSize = 2000     // Limit folder discovery to prevent memory issues
@@ -665,4 +670,72 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
+    
+    //MARK: - Save to CSV
+
+    // MARK: - CSV Export (SwiftUI .fileExporter-backed)
+    func triggerCSVExport() {
+        // Don't export if no results or currently processing
+        guard !comparisonResults.isEmpty, !isProcessing else { return }
+
+        // Build CSV text from flattened & sorted rows to match the UI
+        let header = "Reference,Match,Similarity,Cross-Folder,Reference Folder,Match Folder"
+        var lines: [String] = [header]
+
+        let rows = flattenedResultsSorted
+        lines.reserveCapacity(rows.count + 1)
+
+        for row in rows {
+            let referenceFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let matchFolder     = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            let isCrossFolder   = referenceFolder != matchFolder
+
+            let line = [
+                Self.escapeCSVField(row.reference),
+                Self.escapeCSVField(row.similar),
+                String(format: "%.1f%%", row.percent * 100),
+                isCrossFolder ? "Yes" : "No",
+                Self.escapeCSVField(referenceFolder),
+                Self.escapeCSVField(matchFolder)
+            ].joined(separator: ",")
+
+            lines.append(line)
+        }
+
+        let csvText = lines.joined(separator: "\n") + "\n"
+        csvDocument = CSVDocument(data: Data(csvText.utf8))
+
+        // Friendly default filename
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        exportFilename = "Twinalyzer_Results_\(df.string(from: Date()))"
+
+        isExportingCSV = true
+    }
+
+    /// Handle the completion from .fileExporter
+    func handleCSVExportResult(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            // Reveal in Finder as success feedback
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case .failure(let error):
+            let alert = NSAlert()
+            alert.messageText = "Export Failed"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
+    /// Properly escapes CSV fields (keep your existing version if already present)
+    private static func escapeCSVField(_ field: String) -> String {
+        if field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains("\r") {
+            let escaped = field.replacingOccurrences(of: "\"", with: "\"\"")
+            return "\"\(escaped)\""
+        }
+        return field
+    }
+    
 }

@@ -42,22 +42,39 @@ struct ActionsCommands: Commands {
     var body: some Commands {
         // Override the File menu to add Open command
         CommandGroup(replacing: .newItem) {
-            Button("Open Folder...") {
+            Button {
                 selectFolders()
+            } label: {
+                Label("Open Folder…", systemImage: "folder")
             }
             .keyboardShortcut("o", modifiers: [.command])
             .disabled(viewModel.isProcessing)
+
+            Button {
+                viewModel.triggerCSVExport()
+            } label: {
+                Label("Export CSV…", systemImage: "tablecells")
+            }
+            .disabled(viewModel.isProcessing || viewModel.comparisonResults.isEmpty)
+
         }
+        
+
+
         
         CommandMenu("Actions") {
             if viewModel.isProcessing {
-                Button("Cancel Analysis") {
+                Button {
                     viewModel.cancelAnalysis()
+                } label: {
+                    Label("Cancel Analysis", systemImage: "xmark.circle")
                 }
                 .keyboardShortcut(.escape)
             } else {
-                Button("Analyze Images") {
+                Button {
                     viewModel.processImages(progress: { _ in })
+                } label: {
+                    Label("Analyze Images", systemImage: "wand.and.stars")
                 }
                 .keyboardShortcut("p", modifiers: [.command])
                 .disabled(viewModel.activeLeafFolders.isEmpty)
@@ -65,27 +82,31 @@ struct ActionsCommands: Commands {
             
             Divider()
             
-            // Delete Matches command - cmd+del
-            Button("Delete Matches") {
+            Button {
                 viewModel.deleteSelectedMatches()
+            } label: {
+                Label("Delete Matches", systemImage: "trash")
             }
             .keyboardShortcut(.delete, modifiers: [.command])
             .disabled(viewModel.isProcessing || !viewModel.hasSelectedMatches)
             
-            // Clear Selection command - cmd+opt+l
-            Button("Clear Selection") {
+            Button {
                 viewModel.clearSelection()
+            } label: {
+                Label("Clear Selection", systemImage: "checkmark.circle.badge.xmark")
             }
             .keyboardShortcut("l", modifiers: [.command, .option])
             .disabled(viewModel.isProcessing || !viewModel.hasSelectedMatches)
             
-            Button("Clear All") {
+            Button {
                 viewModel.clearAll()
+            } label: {
+                Label("Clear All", systemImage: "arrow.counterclockwise")
             }
             .keyboardShortcut("l", modifiers: [.command])
             .disabled(viewModel.selectedParentFolders.isEmpty || viewModel.isProcessing)
         }
-        
+
         CommandGroup(replacing: .appInfo) {
             Button("About Twinalyzer") {
                 openWindow(id: "AboutWindow")
