@@ -10,6 +10,7 @@
 import SwiftUI
 import AppKit
 import ImageIO
+import Darwin.Mach
 
 // MARK: - Optimized Image Preview Component
 /// High-performance SwiftUI view for displaying image thumbnails with intelligent caching
@@ -149,6 +150,7 @@ struct PreviewImage: View {
         let pathToLoad = path
         loadingTask = Task(priority: priority) {
             await load(pathToLoad)
+            await MainActor.run { self.loadingTask = nil }
         }
     }
     
@@ -164,25 +166,27 @@ struct PreviewImage: View {
 
     // MARK: - Async Image Loading Pipeline
     private func load(_ pathToLoad: String) async {
+        ImageCache.ensureBootstrapped()
         let bucket = ImageProcessingUtilities.cacheBucket(for: maxDimension)
         let key = "\(pathToLoad)::\(bucket)" as NSString
 
         // 1) Cache hit fast path
         if let cached = ImageCache.shared.object(forKey: key) {
-            setImage(cached, forPath: pathToLoad)
+            await MainActor.run { self.setImage(cached, forPath: pathToLoad) }
             return
         }
+
 
         // 2) Early cancellation / state
         guard !Task.isCancelled, pathToLoad == self.path else { return }
-        setLoading(true)
+        await MainActor.run { self.setLoading(true) }
 
         // 3) Memory pressure check
         if await isMemoryPressureHigh() {
-            print("Warning: High memory pressure, skipping image load for \((pathToLoad as NSString).lastPathComponent)")
-            setError()
+            await MainActor.run { self.setError() }
             return
         }
+
 
         // 4) Decode off-main with timeout (via utility)
         let url = URL(fileURLWithPath: pathToLoad)
@@ -207,7 +211,7 @@ struct PreviewImage: View {
                 setImage(ns, forPath: pathToLoad)
             }
         } else {
-            setError()
+            await MainActor.run { self.setError() }
         }
     }
     

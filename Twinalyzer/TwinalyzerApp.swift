@@ -11,9 +11,14 @@ import SwiftUI
 
 @main
 struct TwinalyzerApp: App {
+    init() {
+        ImageCache.ensureBootstrapped()
+    }
+    
     @StateObject private var appViewModel = AppViewModel()
     
     var body: some Scene {
+
         WindowGroup {
             ContentView()
                 .environmentObject(appViewModel)

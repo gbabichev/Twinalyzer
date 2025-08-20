@@ -29,6 +29,14 @@ private enum _ImageCacheConfig {
 public final class ImageCache {
     /// Shared cache instance accessible throughout the app
     /// NSCache is thread-safe and handles memory pressure automatically
+    ///
+    
+    private static let _bootstrap: Void = {
+        configureCacheLimits()
+        setupMemoryPressureMonitoring()
+    }()
+    @inline(__always) public static func ensureBootstrapped() { _ = _bootstrap }
+
     public static let shared = NSCache<NSString, NSImage>()
     
     // MARK: - Configuration
@@ -235,5 +243,6 @@ public enum ImageProcessingUtilities {
         return (count: 0, totalCost: 0)
         // If you later track costs manually, return real values here.
     }
+    
 }
 
