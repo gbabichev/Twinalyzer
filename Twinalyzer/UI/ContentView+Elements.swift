@@ -10,12 +10,22 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Scroll Offset Preference Key
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 extension ContentView {
+    
     
     // MARK: - Processing View
     /// Full-screen view displayed during image analysis OR folder discovery
     /// Shows progress bar for analysis, spinner for discovery
-    /// ENHANCED: Now properly handles both states with appropriate progress indicators
+    /// ENHANCED: Added elegant scroll indicators instead of system scrollbars
     var processingView: some View {
         VStack(spacing: 16) {
             if vm.isDiscoveringFolders {
@@ -39,32 +49,136 @@ extension ContentView {
                 }
             }
             
-            // List of folders currently being processed
-            VStack(alignment: .leading, spacing: 6) {
-                Text(vm.isDiscoveringFolders ? "Scanning Parent Folders..." : "Processing Folders...")
-                    .font(.subheadline)
+            // Enhanced scrollable list with custom indicators
+            folderListWithScrollIndicators
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    // MARK: - Folder List with Custom Scroll Indicators
+    var folderListWithScrollIndicators: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(vm.isDiscoveringFolders ? "Scanning Parent Folders..." : "Processing Folders...")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            
+            if vm.allFoldersBeingProcessed.isEmpty {
+                Text("No folders selected.")
                     .foregroundStyle(.secondary)
-                if vm.allFoldersBeingProcessed.isEmpty {
-                    Text("No folders selected.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    // Scrollable list of folder paths with abbreviated display
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(vm.allFoldersBeingProcessed, id: \.self) { url in
-                                Text(DisplayHelpers.shortDisplayPath(for: url.path))
-                                    .font(.body)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
+            } else {
+                // Custom scroll view with fade indicators - remove GeometryReader width constraint
+                ZStack {
+                    // Main scroll view (hidden scrollbar)
+                    ScrollViewReader { proxy in
+                        ScrollView(showsIndicators: false) {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(vm.allFoldersBeingProcessed.enumerated()), id: \.offset) { index, url in
+                                    Text(DisplayHelpers.shortDisplayPath(for: url.path))
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false) // Allow text to expand horizontally
+                                        .id(index) // For scroll tracking
+                                }
+                                
+                                // Invisible bottom detector
+                                Color.clear
+                                    .frame(height: 1)
+                                    .onAppear {
+                                        isScrolledToBottom = true
+                                    }
+                                    .onDisappear {
+                                        isScrolledToBottom = false
+                                    }
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.bottom, isScrollable ? 40 : 0) // Extra padding when scrollable to clear the fade
+                            .background(
+                                // Content height measurement - fixed approach
+                                GeometryReader { contentGeometry in
+                                    Color.clear
+                                        .onAppear {
+                                            contentHeight = contentGeometry.size.height
+                                        }
+                                        .onChange(of: contentGeometry.size.height) { _, newHeight in
+                                            contentHeight = newHeight
+                                            updateScrollableState(availableHeight: 200)
+                                        }
+                                }
+                            )
+                        }
+                        .background(
+                            // Scroll offset tracking
+                            GeometryReader { scrollGeometry in
+                                Color.clear
+                                    .preference(key: ScrollOffsetPreferenceKey.self,
+                                              value: scrollGeometry.frame(in: .named("scroll")).minY)
+                            }
+                        )
+                        .coordinateSpace(name: "scroll")
+                        .onChange(of: vm.allFoldersBeingProcessed.count) { _, newCount in
+                            // Update scrollable state when folder count changes
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                updateScrollableState(availableHeight: 200)
                             }
                         }
                     }
-                    .frame(maxHeight: 200) // Only constrain height, let width be natural
+                    
+                    // Top fade indicator (when scrolled down)
+                    LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: Color(NSColor.controlBackgroundColor), location: 0),
+                            .init(color: Color(NSColor.controlBackgroundColor).opacity(0), location: 1)
+                        ]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 20)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .opacity(scrollOffset < -10 ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.2), value: scrollOffset < -10)
+                    
+                    // Bottom fade indicator with arrow (when content extends below)
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Color(NSColor.controlBackgroundColor).opacity(0), location: 0),
+                                .init(color: Color(NSColor.controlBackgroundColor), location: 1)
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 30)
+                        
+                        // Subtle down arrow indicator
+                        HStack {
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary.opacity(0.8))
+                                .padding(.bottom, 4)
+                            Spacer()
+                        }
+                        .background(Color(NSColor.controlBackgroundColor))
+                    }
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .opacity(isScrollable && !isScrolledToBottom ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.2), value: isScrollable && !isScrolledToBottom)
+                }
+                .frame(maxHeight: 200)
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                    scrollOffset = value
+                    // Don't call updateScrolledToBottomState here - let the invisible detector handle it
+                }
+                .onAppear {
+                    updateScrollableState(availableHeight: 200)
+                }
+                .onChange(of: vm.allFoldersBeingProcessed) { _, _ in
+                    updateScrollableState(availableHeight: 200)
                 }
             }
-            .fixedSize(horizontal: true, vertical: false) // Key addition: size to content width, flexible height
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .fixedSize(horizontal: true, vertical: false) // Size to content width, flexible height
     }
     
     // MARK: - Settings Panel
@@ -474,4 +588,13 @@ extension ContentView {
         }
     }
     
+}
+
+// MARK: - Content Size Preference Key
+struct ContentSizePreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
