@@ -338,9 +338,10 @@ public enum ImageAnalyzer {
         }
         
         // Clustering is fast, so we do it on the main actor for thread safety
-        return await MainActor.run {
-            _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
-        }
+//        return await MainActor.run {
+//            _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
+//        }
+        return await _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
     }
     
     /// Extracts a feature vector from a single image using Apple's Vision framework
@@ -457,7 +458,6 @@ public enum ImageAnalyzer {
     /// Advanced clustering algorithm for Vision framework feature vectors
     /// Groups similar images while intelligently choosing reference images
     /// Must run on MainActor due to Vision framework requirements
-    @MainActor
     private static func _clusterFeaturePrints(
         observations: [VNFeaturePrintObservation],
         paths: [String],
