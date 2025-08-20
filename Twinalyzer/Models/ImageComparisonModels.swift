@@ -20,15 +20,27 @@ import Foundation
 
 /// Defines the two available analysis methods with user-friendly names
 /// Each mode represents a different algorithmic approach with distinct trade-offs
-public enum AnalysisMode: String, CaseIterable, Identifiable {
-    case deepFeature = "Enhanced Scan"    // AI-based analysis using Vision framework
-    case perceptualHash = "Basic Scan"    // Fast fingerprint-based comparison
+public enum AnalysisMode: String, CaseIterable, Identifiable, RawRepresentable {
+    case deepFeature = "Enhanced Scan"
+    case perceptualHash = "Basic Scan"
     
     public var id: String { rawValue }
     
-    // Analysis method characteristics:
-    // Enhanced Scan: Slower but more intelligent, detects similar content with different crops/lighting
-    // Basic Scan: Faster but stricter, good for finding exact or near-exact duplicates
+    // RawRepresentable conformance (may be automatically synthesized)
+    public var rawValue: String {
+        switch self {
+        case .deepFeature: return "Enhanced Scan"
+        case .perceptualHash: return "Basic Scan"
+        }
+    }
+    
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "Enhanced Scan": self = .deepFeature
+        case "Basic Scan": self = .perceptualHash
+        default: return nil
+        }
+    }
 }
 
 // MARK: - Core Data Models

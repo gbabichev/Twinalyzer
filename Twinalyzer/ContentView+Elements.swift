@@ -276,10 +276,10 @@ extension ContentView {
                 PreviewImage(path: row.reference, maxDimension: maxDim)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
                     .clipped()
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
+//                    .overlay(
+//                        RoundedRectangle(cornerRadius: 4)
+//                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+//                    )
                 
                 // Delete reference button
                 Button("Delete Reference") {
@@ -308,10 +308,10 @@ extension ContentView {
                 PreviewImage(path: row.similar, maxDimension: maxDim)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
                     .clipped()
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(DisplayHelpers.isCrossFolder(row) ? Color.red.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: 1)
-                    )
+//                    .overlay(
+//                        RoundedRectangle(cornerRadius: 4)
+//                            .stroke(DisplayHelpers.isCrossFolder(row) ? Color.red.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: 1)
+//                    )
                 
                 // Delete match button
                 Button("Delete Match") {
@@ -331,10 +331,10 @@ extension ContentView {
     /// Displays discovered leaf folders with removal options
     var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Selected Folders")
-                .font(.headline)
-                .padding(.horizontal)
-                .padding(.top)
+//            Text("Selected Folders")
+//                .font(.headline)
+//                .padding(.horizontal)
+//                .padding(.top)
             
             // Show folders if any have been discovered
             if !vm.discoveredLeafFolders.isEmpty {

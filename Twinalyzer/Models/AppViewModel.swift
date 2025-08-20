@@ -25,9 +25,9 @@ final class AppViewModel: ObservableObject {
     
     @Published var selectedParentFolders: [URL] = []          // User-selected root directories
     @Published var excludedLeafFolders: Set<URL> = []         // Folders user has manually removed
-    @Published var similarityThreshold: Double = 0.7          // 0.0-1.0 similarity cutoff
-    @Published var selectedAnalysisMode: AnalysisMode = .deepFeature  // AI vs Hash analysis
-    @Published var scanTopLevelOnly: Bool = false             // Limit to folder contents only
+    @AppStorage("similarityThreshold") var similarityThreshold: Double = 0.7          // 0.0-1.0 similarity cutoff
+    @AppStorage("selectedAnalysisMode") var selectedAnalysisMode: AnalysisMode = .deepFeature  // AI vs Hash analysis
+    @AppStorage("scanTopLevelOnly") var scanTopLevelOnly: Bool = false // Limit to folder contents only
     @Published var isProcessing: Bool = false                 // Analysis in progress flag
     @Published var processingProgress: Double? = nil          // 0.0-1.0 or nil for indeterminate
     @Published var comparisonResults: [ImageComparisonResult] = []  // Analysis results

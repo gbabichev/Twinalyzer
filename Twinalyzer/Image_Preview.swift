@@ -27,7 +27,6 @@ struct PreviewImage: View {
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFit()
-                    .border(Color.gray.opacity(0.4))
             } else {
                 // Loading indicator while image is being processed
                 ProgressView().frame(width: 32, height: 32)
