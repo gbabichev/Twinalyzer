@@ -271,28 +271,26 @@ public enum ImageAnalyzer {
     /// FIXED: ALWAYS only scans top-level of provided folders to prevent subfolder discovery
     private nonisolated static func getAllFilesFromExactFolders(
         folders: [URL],
-        topLevelOnly: Bool,  // This parameter is now informational only
+        topLevelOnly: Bool,
         ignoredFolderName: String = "",
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [URL] {
-        var allFiles: [URL] = []
-        
+        var all: [URL] = []
+        all.reserveCapacity(1024)
+
         for folder in folders {
             if shouldCancel?() == true { break }
-            
-            // FIXED: ALWAYS only scan the top level of each provided folder
-            // This prevents discovering new subfolders that were added after discovery
-            let files = await topLevelImageFilesAsync(
+
+            let files = await allImageFilesAsync(
                 in: folder,
                 ignoredFolderName: ignoredFolderName,
+                topLevelOnly: topLevelOnly,   // <- use the argument, don't force top-level
                 shouldCancel: shouldCancel
             )
-            
-            allFiles.append(contentsOf: files)
+            all.append(contentsOf: files)
             await Task.yield()
         }
-        
-        return allFiles
+        return all
     }
 
     // MARK: - Rest of the implementation (unchanged methods)
