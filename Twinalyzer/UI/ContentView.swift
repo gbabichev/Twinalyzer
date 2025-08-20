@@ -112,7 +112,7 @@ struct ContentView: View {
                         deletionSelection.removeAll()
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "xmark.circle")
+                            Label("Clear Selections", systemImage: "xmark.circle")
                             Text("Clear")
                                 .font(.caption)
                         }
@@ -128,7 +128,8 @@ struct ContentView: View {
                         deletionSelection.removeAll() // Clear selection after deletion
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "trash")
+                            Label("Trash Matches", systemImage: "trash")
+                            //Image(systemName: "trash")
                             Text("\(deletionSelection.count)")
                                 .font(.caption)
                                 .fontWeight(.medium)
