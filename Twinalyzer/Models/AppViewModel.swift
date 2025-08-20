@@ -536,28 +536,43 @@ final class AppViewModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    /// Batch delete operation for selected match files
-    /// Delegates to individual deleteFile for each selected item
-    func deleteSelectedMatches(selectedMatches: [String]) {
-        guard !selectedMatches.isEmpty else { return }
-        selectedMatches.forEach(deleteFile)
+    /// Deletes currently selected matches (called from UI)
+    func deleteSelectedMatches() {
+        guard !selectedMatchesForDeletion.isEmpty else { return }
+        
+        let matchesToDelete = Array(selectedMatchesForDeletion)
+        selectedMatchesForDeletion.removeAll()
+        
+        // Convert row IDs back to file paths for deletion
+        let filePaths = matchesToDelete.compactMap { rowID -> String? in
+            // Row ID format is "reference::similar" - we want to delete the "similar" file
+            let components = rowID.components(separatedBy: "::")
+            return components.count == 2 ? components[1] : nil
+        }
+        
+        // Delete each file
+        filePaths.forEach(deleteFile)
     }
-    
+
     /// Deletes a single file and updates the results data structure
     /// Uses macOS trash for safety, then cleanly removes from analysis results
-    /// Maintains data consistency by removing empty result groups
     func deleteFile(_ path: String) {
         // Move file to trash (safer than permanent deletion)
-        try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+        do {
+            try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+        } catch {
+            print("Failed to move file to trash: \(error.localizedDescription)")
+            // Continue with data structure updates even if file deletion failed
+        }
         
         // Update results data structure to reflect the deletion
         // Process in reverse order to avoid index shifting during removal
         for (index, result) in comparisonResults.enumerated().reversed() {
             let filteredSimilars = result.similars.filter { $0.path != path }
-            let nonReferenceSimilars = filteredSimilars.filter { $0.path != result.reference }
+            let hasNonReferenceSimilars = filteredSimilars.contains { $0.path != result.reference }
             
-            if result.reference == path || nonReferenceSimilars.isEmpty {
-                // Remove entire result if reference was deleted or no matches remain
+            if result.reference == path || !hasNonReferenceSimilars {
+                // Remove entire result if reference was deleted or no non-reference similars remain
                 comparisonResults.remove(at: index)
             } else if filteredSimilars.count != result.similars.count {
                 // Update result with filtered similars if some were removed
@@ -567,9 +582,9 @@ final class AppViewModel: ObservableObject {
                 )
             }
         }
-        
-        // Note: Cache invalidation happens automatically via comparisonResults didSet
     }
+    
+    
     
     // MARK: - Selection Management for Menu Commands
     /// Tracks selected matches for deletion (shared between ContentView and menu commands)
@@ -606,13 +621,6 @@ final class AppViewModel: ObservableObject {
                 selectedMatchesForDeletion.insert(focusedID)
             }
         }
-    }
-    
-    /// Deletes currently selected matches (called from menu command)
-    func deleteSelectedMatches() {
-        let matchesToDelete = Array(selectedMatchesForDeletion)
-        deleteSelectedMatches(selectedMatches: matchesToDelete)
-        selectedMatchesForDeletion.removeAll()
     }
     
     /// Clears the current selection (called from menu command)
@@ -671,8 +679,6 @@ final class AppViewModel: ObservableObject {
         }
     }
     
-    //MARK: - Save to CSV
-
     // MARK: - CSV Export (SwiftUI .fileExporter-backed)
     func triggerCSVExport() {
         // Don't export if no results or currently processing
