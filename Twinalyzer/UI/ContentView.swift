@@ -152,7 +152,7 @@ struct ContentView: View {
                                 .fontWeight(.medium)
                         }
                     }
-                    .keyboardShortcut(.delete, modifiers: [])
+                    .keyboardShortcut(.delete, modifiers: [.command])
                     .help("Delete \(vm.selectedMatchesForDeletion.count) selected match\(vm.selectedMatchesForDeletion.count == 1 ? "" : "es")")
                     .disabled(vm.isAnyOperationRunning) // Disable during processing
                 }

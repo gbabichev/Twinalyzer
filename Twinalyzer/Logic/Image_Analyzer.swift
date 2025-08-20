@@ -58,9 +58,9 @@ public enum ImageAnalyzer {
     /// Primary analysis method using Apple's Vision framework for intelligent similarity detection
     /// Can detect similar content even with different crops, lighting, or minor modifications
     /// More computationally intensive but significantly more accurate than hash-based methods
-    /// ENHANCED: Added batch size limiting and memory pressure monitoring
+    /// FIXED: Now only processes the exact folders passed in, no re-discovery
     public nonisolated static func analyzeWithDeepFeatures(
-        inFolders roots: [URL],
+        inFolders leafFolders: [URL],  // FIXED: Use exact folders from sidebar
         similarityThreshold: Double,
         topLevelOnly: Bool,
         ignoredFolderName: String = "",
@@ -69,12 +69,6 @@ public enum ImageAnalyzer {
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
     ) {
         Task.detached(priority: .userInitiated) {
-            // Determine which folders to scan based on user preferences
-            let subdirs = await foldersToScanAsync(
-                from: roots,
-                ignoredFolderName: ignoredFolderName,
-                shouldCancel: shouldCancel
-            )
             guard shouldCancel?() != true else {
                 await MainActor.run { completion([]) }
                 return
@@ -85,10 +79,10 @@ public enum ImageAnalyzer {
             if topLevelOnly {
                 // Process each folder separately to maintain folder boundaries
                 var totalProcessed = 0
-                let allFiles = await getAllFilesAsync(
-                    from: subdirs,
+                let allFiles = await getAllFilesFromExactFolders(
+                    folders: leafFolders,
                     topLevelOnly: true,
-                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                    ignoredFolderName: ignoredFolderName,
                     shouldCancel: shouldCancel
                 )
                 let totalCount = allFiles.count
@@ -99,12 +93,12 @@ public enum ImageAnalyzer {
                     print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
                 }
                 
-                for dir in subdirs {
+                for dir in leafFolders {
                     if shouldCancel?() == true { break }
                     
                     let files = await topLevelImageFilesAsync(
                         in: dir,
-                        ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                        ignoredFolderName: ignoredFolderName,
                         shouldCancel: shouldCancel
                     )
                     let folderResults = await processImageBatch(
@@ -121,10 +115,10 @@ public enum ImageAnalyzer {
                 }
             } else {
                 // Process all images together for cross-folder duplicate detection
-                let allFiles = await getAllFilesAsync(
-                    from: subdirs,
+                let allFiles = await getAllFilesFromExactFolders(
+                    folders: leafFolders,
                     topLevelOnly: false,
-                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
+                    ignoredFolderName: ignoredFolderName,
                     shouldCancel: shouldCancel
                 )
                 
@@ -151,6 +145,157 @@ public enum ImageAnalyzer {
             }
         }
     }
+
+    // MARK: - Perceptual Hash Analysis (Fast)
+    /// Alternative analysis method using perceptual hashing for fast duplicate detection
+    /// Best for finding exact or near-exact duplicates with minimal computational overhead
+    /// Uses block hash algorithm (8x8 grayscale grid) with Hamming distance comparison
+    /// FIXED: Now only processes the exact folders passed in, no re-discovery
+    public nonisolated static func analyzeWithPerceptualHash(
+        inFolders leafFolders: [URL],  // FIXED: Use exact folders from sidebar
+        similarityThreshold: Double,
+        topLevelOnly: Bool,
+        ignoredFolderName: String = "",
+        progress: (@Sendable (Double) -> Void)? = nil,
+        shouldCancel: (@Sendable () -> Bool)? = nil,
+        completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
+    ) {
+        // Convert similarity threshold to maximum Hamming distance
+        // 64-bit hash allows 0-64 bit differences
+        let maxDist = max(0, min(64, Int((1.0 - similarityThreshold) * 64.0)))
+        
+        Task.detached(priority: .userInitiated) {
+            let pairs = await computeHashPairs(
+                folders: leafFolders,  // FIXED: Use exact folders
+                topLevelOnly: topLevelOnly,
+                maxDist: maxDist,
+                ignoredFolderName: ignoredFolderName,
+                progress: progress,
+                shouldCancel: shouldCancel
+            )
+            
+            if shouldCancel?() == true {
+                await MainActor.run { completion([]) }
+                return
+            }
+            
+            // Group pairs into structured results on main actor
+            let results = await MainActor.run {
+                groupPairsIntoResults(pairs)
+            }
+            
+            await MainActor.run {
+                progress?(1.0)
+                completion(results)
+            }
+        }
+    }
+    
+    /// Computes perceptual hash pairs for similarity comparison
+    /// FIXED: Only processes exact folders passed in, no re-discovery
+    private nonisolated static func computeHashPairs(
+        folders: [URL],  // FIXED: Use exact folders from sidebar
+        topLevelOnly: Bool,
+        maxDist: Int,
+        ignoredFolderName: String = "",
+        progress: (@Sendable (Double) -> Void)?,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [TableRow] {
+        
+        guard shouldCancel?() != true else { return [] }
+        
+        var allPairs: [TableRow] = []
+        
+        if topLevelOnly {
+            // Process folders separately for folder-specific analysis
+            var totalProcessed = 0
+            let allFiles = await getAllFilesFromExactFolders(
+                folders: folders,
+                topLevelOnly: true,
+                ignoredFolderName: ignoredFolderName,
+                shouldCancel: shouldCancel
+            )
+            let totalCount = min(allFiles.count, maxBatchSize) // Limit processing
+            
+            for dir in folders {
+                if shouldCancel?() == true { break }
+                
+                let files = await topLevelImageFilesAsync(
+                    in: dir,
+                    ignoredFolderName: ignoredFolderName,
+                    shouldCancel: shouldCancel
+                )
+                let pairs = await hashAndCompareWithProgress(
+                    files: files,
+                    maxDist: maxDist,
+                    processedSoFar: totalProcessed,
+                    totalCount: totalCount,
+                    progress: progress,
+                    shouldCancel: shouldCancel
+                )
+                allPairs.append(contentsOf: pairs)
+                
+                totalProcessed += files.count
+            }
+        } else {
+            // Process all files together for cross-folder comparison
+            let allFiles = await getAllFilesFromExactFolders(
+                folders: folders,
+                topLevelOnly: false,
+                ignoredFolderName: ignoredFolderName,
+                shouldCancel: shouldCancel
+            )
+            let limitedFiles = Array(allFiles.prefix(maxBatchSize)) // Limit to prevent memory issues
+            
+            if limitedFiles.count < allFiles.count {
+                print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
+            }
+            
+            allPairs = await hashAndCompareWithProgress(
+                files: limitedFiles,
+                maxDist: maxDist,
+                processedSoFar: 0,
+                totalCount: limitedFiles.count,
+                progress: progress,
+                shouldCancel: shouldCancel
+            )
+        }
+        
+        // Return pairs sorted by similarity percentage (highest first)
+        return allPairs.sorted { $0.percent > $1.percent }
+    }
+
+    // MARK: - FIXED: New method that only scans exact folders (no re-discovery)
+    /// Gets all image files from the exact list of folders provided
+    /// This ensures consistency with what's shown in the sidebar
+    /// FIXED: ALWAYS only scans top-level of provided folders to prevent subfolder discovery
+    private nonisolated static func getAllFilesFromExactFolders(
+        folders: [URL],
+        topLevelOnly: Bool,  // This parameter is now informational only
+        ignoredFolderName: String = "",
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [URL] {
+        var allFiles: [URL] = []
+        
+        for folder in folders {
+            if shouldCancel?() == true { break }
+            
+            // FIXED: ALWAYS only scan the top level of each provided folder
+            // This prevents discovering new subfolders that were added after discovery
+            let files = await topLevelImageFilesAsync(
+                in: folder,
+                ignoredFolderName: ignoredFolderName,
+                shouldCancel: shouldCancel
+            )
+            
+            allFiles.append(contentsOf: files)
+            await Task.yield()
+        }
+        
+        return allFiles
+    }
+
+    // MARK: - Rest of the implementation (unchanged methods)
     
     /// Processes a batch of images through the Vision framework pipeline
     /// Extracts feature vectors from each image then clusters similar ones
@@ -228,131 +373,6 @@ public enum ImageAnalyzer {
                 }
             }
         }
-    }
-
-    // MARK: - Perceptual Hash Analysis (Fast)
-    /// Alternative analysis method using perceptual hashing for fast duplicate detection
-    /// Best for finding exact or near-exact duplicates with minimal computational overhead
-    /// Uses block hash algorithm (8x8 grayscale grid) with Hamming distance comparison
-    /// ENHANCED: Added cooperative cancellation in O(n²) comparison loop
-    public nonisolated static func analyzeWithPerceptualHash(
-        inFolders roots: [URL],
-        similarityThreshold: Double,
-        topLevelOnly: Bool,
-        ignoredFolderName: String = "",
-        progress: (@Sendable (Double) -> Void)? = nil,
-        shouldCancel: (@Sendable () -> Bool)? = nil,
-        completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
-    ) {
-        // Convert similarity threshold to maximum Hamming distance
-        // 64-bit hash allows 0-64 bit differences
-        let maxDist = max(0, min(64, Int((1.0 - similarityThreshold) * 64.0)))
-        
-        Task.detached(priority: .userInitiated) {
-            let pairs = await computeHashPairs(
-                roots: roots,
-                topLevelOnly: topLevelOnly,
-                maxDist: maxDist,
-                ignoredFolderName: ignoredFolderName,
-                progress: progress,
-                shouldCancel: shouldCancel
-            )
-            
-            if shouldCancel?() == true {
-                await MainActor.run { completion([]) }
-                return
-            }
-            
-            // Group pairs into structured results on main actor
-            let results = await MainActor.run {
-                groupPairsIntoResults(pairs)
-            }
-            
-            await MainActor.run {
-                progress?(1.0)
-                completion(results)
-            }
-        }
-    }
-    
-    /// Computes perceptual hash pairs for similarity comparison
-    /// Generates hash for each image then compares all pairs within distance threshold
-    /// ENHANCED: Now includes proper progress reporting at the image level and batch limiting
-    private nonisolated static func computeHashPairs(
-        roots: [URL],
-        topLevelOnly: Bool,
-        maxDist: Int,
-        ignoredFolderName: String = "",
-        progress: (@Sendable (Double) -> Void)?,
-        shouldCancel: (@Sendable () -> Bool)?
-    ) async -> [TableRow] {
-        
-        let subdirs = await foldersToScanAsync(
-            from: roots,
-            ignoredFolderName: ignoredFolderName,
-            shouldCancel: shouldCancel
-        )
-        guard shouldCancel?() != true else { return [] }
-        
-        var allPairs: [TableRow] = []
-        
-        if topLevelOnly {
-            // Process folders separately for folder-specific analysis
-            var totalProcessed = 0
-            let allFiles = await getAllFilesAsync(
-                from: subdirs,
-                topLevelOnly: true,
-                ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
-                shouldCancel: shouldCancel
-            )
-            let totalCount = min(allFiles.count, maxBatchSize) // Limit processing
-            
-            for dir in subdirs {
-                if shouldCancel?() == true { break }
-                
-                let files = await topLevelImageFilesAsync(
-                    in: dir,
-                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
-                    shouldCancel: shouldCancel
-                )
-                let pairs = await hashAndCompareWithProgress(
-                    files: files,
-                    maxDist: maxDist,
-                    processedSoFar: totalProcessed,
-                    totalCount: totalCount,
-                    progress: progress,
-                    shouldCancel: shouldCancel
-                )
-                allPairs.append(contentsOf: pairs)
-                
-                totalProcessed += files.count
-            }
-        } else {
-            // Process all files together for cross-folder comparison
-            let allFiles = await getAllFilesAsync(
-                from: subdirs,
-                topLevelOnly: false,
-                ignoredFolderName: ignoredFolderName,  // FIXED: Pass ignored folder name
-                shouldCancel: shouldCancel
-            )
-            let limitedFiles = Array(allFiles.prefix(maxBatchSize)) // Limit to prevent memory issues
-            
-            if limitedFiles.count < allFiles.count {
-                print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
-            }
-            
-            allPairs = await hashAndCompareWithProgress(
-                files: limitedFiles,
-                maxDist: maxDist,
-                processedSoFar: 0,
-                totalCount: limitedFiles.count,
-                progress: progress,
-                shouldCancel: shouldCancel
-            )
-        }
-        
-        // Return pairs sorted by similarity percentage (highest first)
-        return allPairs.sorted { $0.percent > $1.percent }
     }
     
     /// Enhanced hash comparison with proper progress reporting and cooperative cancellation
@@ -436,7 +456,6 @@ public enum ImageAnalyzer {
         }.sorted { ($0.similars.first?.percent ?? 0) > ($1.similars.first?.percent ?? 0) }
     }
 
-    // MARK: - Deep Feature Clustering Algorithm
     /// Advanced clustering algorithm for Vision framework feature vectors
     /// Groups similar images while intelligently choosing reference images
     /// Must run on MainActor due to Vision framework requirements
@@ -534,242 +553,7 @@ public enum ImageAnalyzer {
         return results
     }
 
-    // MARK: - Enhanced Directory Discovery and Planning
-    /// Determines which folders should be scanned based on user selections
-    /// Handles both leaf folders (no subdirectories) and parent folders with children
-    /// Deduplicates results while preserving selection order
-    /// ENHANCED: Made async with cooperative cancellation
-    public nonisolated static func foldersToScan(from roots: [URL]) -> [URL] {
-        // Legacy synchronous version for backward compatibility
-        var out: [URL] = []
-        out.reserveCapacity(roots.count * 4)
-
-        for root in roots {
-            let subs = recursiveSubdirectoriesExcludingRoots(under: [root])
-            if subs.isEmpty {
-                out.append(root)
-            } else {
-                out.append(contentsOf: subs)
-            }
-        }
-
-        var seen = Set<URL>()
-        return out.filter { seen.insert($0.standardizedFileURL).inserted }
-    }
-    
-    /// Async version with cancellation support
-    private nonisolated static func foldersToScanAsync(
-        from roots: [URL],
-        ignoredFolderName: String = "",
-        shouldCancel: (@Sendable () -> Bool)?
-    ) async -> [URL] {
-        var out: [URL] = []
-        out.reserveCapacity(roots.count * 4)
-
-        for root in roots {
-            if shouldCancel?() == true { break }
-            
-            let subs = await recursiveSubdirectoriesExcludingRootsAndIgnoredAsync(
-                under: [root],
-                ignoredFolderName: ignoredFolderName,
-                shouldCancel: shouldCancel
-            )
-            if subs.isEmpty {
-                // Check if the root itself should be ignored
-                let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                let rootName = root.lastPathComponent.lowercased()
-                
-                if ignoredName.isEmpty || rootName != ignoredName {
-                    out.append(root)
-                }
-            } else {
-                out.append(contentsOf: subs)
-            }
-            
-            await Task.yield() // Yield after each root
-        }
-
-        var seen = Set<URL>()
-        return out.filter { seen.insert($0.standardizedFileURL).inserted }
-    }
-
-    public nonisolated static func recursiveSubdirectoriesExcludingRootsAndIgnored(
-        under roots: [URL],
-        ignoredFolderName: String = ""
-    ) -> [URL] {
-        let fm = FileManager.default
-        var dirs: [URL] = []
-        dirs.reserveCapacity(256)
-        
-        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        for root in roots {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
-            if let enumerator = fm.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) {
-                // Use while loop instead of for-in to avoid iterator issues
-                while let element = enumerator.nextObject() {
-                    guard let url = element as? URL else { continue }
-                    if let r = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
-                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
-                        
-                        // FILTER: Skip folders with the ignored name (case-insensitive)
-                        let folderName = url.lastPathComponent.lowercased()
-                        if !ignoredName.isEmpty && folderName == ignoredName {
-                            // Skip this folder
-                            continue
-                        }
-                        
-                        dirs.append(url)
-                    }
-                }
-            }
-        }
-        return dirs
-    }
-
-    /// ENHANCED: Async version with chunked processing and ignored folder filtering
-    private nonisolated static func recursiveSubdirectoriesExcludingRootsAndIgnoredAsync(
-        under roots: [URL],
-        ignoredFolderName: String = "",
-        shouldCancel: (@Sendable () -> Bool)?
-    ) async -> [URL] {
-        var dirs: [URL] = []
-        dirs.reserveCapacity(256)
-        
-        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-
-        for root in roots {
-            if shouldCancel?() == true { break }
-
-            // Build the URL list off-thread WITHOUT capturing a non-Sendable FileManager.
-            let allURLs: [URL] = await Task.detached(priority: .userInitiated) { [root, ignoredName] in
-                let fm = FileManager.default
-                guard let enumerator = fm.enumerator(
-                    at: root,
-                    includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
-                ) else { return [] }
-
-                var urls: [URL] = []
-                // Use nextObject() loop (no Sequence/Iterator in async contexts)
-                while let element = enumerator.nextObject() as? URL {
-                    if let r = try? element.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
-                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
-                        
-                        // FILTER: Skip folders with the ignored name (case-insensitive)
-                        let folderName = element.lastPathComponent.lowercased()
-                        if !ignoredName.isEmpty && folderName == ignoredName {
-                            // Skip this folder
-                            continue
-                        }
-                        
-                        urls.append(element)
-                    }
-                }
-                return urls
-            }.value
-
-            var count = 0
-            for url in allURLs {
-                if shouldCancel?() == true { break }
-
-                count += 1
-                if count % 50 == 0 { await Task.yield() } // keep UI responsive
-
-                dirs.append(url)
-            }
-
-            await Task.yield() // yield after each root
-        }
-        return dirs
-    }
-    
-    /// Recursively discovers all subdirectories within given root directories
-    /// Excludes hidden files and package contents for cleaner results
-    /// Returns flattened list of all discovered subdirectories
-    public nonisolated static func  recursiveSubdirectoriesExcludingRoots(under roots: [URL]) -> [URL] {
-        let fm = FileManager.default
-        var dirs: [URL] = []
-        dirs.reserveCapacity(256)
-        for root in roots {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
-            if let enumerator = fm.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) {
-                // Use while loop instead of for-in to avoid iterator issues
-                while let element = enumerator.nextObject() {
-                    guard let url = element as? URL else { continue }
-                    if let r = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
-                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
-                        dirs.append(url)
-                    }
-                }
-            }
-        }
-        return dirs
-    }
-    
-    /// ENHANCED: Async version with chunked processing and cancellation
-    private nonisolated static func recursiveSubdirectoriesExcludingRootsAsync(
-        under roots: [URL],
-        shouldCancel: (@Sendable () -> Bool)?
-    ) async -> [URL] {
-        var dirs: [URL] = []
-        dirs.reserveCapacity(256)
-
-        for root in roots {
-            if shouldCancel?() == true { break }
-
-            // Build the URL list off-thread WITHOUT capturing a non-Sendable FileManager.
-            let allURLs: [URL] = await Task.detached(priority: .userInitiated) { [root] in
-                let fm = FileManager.default
-                guard let enumerator = fm.enumerator(
-                    at: root,
-                    includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
-                ) else { return [] }
-
-                var urls: [URL] = []
-                // Use nextObject() loop (no Sequence/Iterator in async contexts)
-                while let element = enumerator.nextObject() as? URL {
-                    if let r = try? element.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
-                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
-                        urls.append(element)
-                    }
-                }
-                return urls
-            }.value
-
-            var count = 0
-            for url in allURLs {
-                if shouldCancel?() == true { break }
-
-                count += 1
-                if count % 50 == 0 { await Task.yield() } // keep UI responsive
-
-                dirs.append(url)
-            }
-
-            await Task.yield() // yield after each root
-        }
-        return dirs
-    }
-
     // MARK: - Enhanced File Discovery and Filtering
-    /// Recursively finds all image files within a directory tree
-    /// Filters by supported image extensions and excludes hidden files
-    /// FIXED: Now properly handles ignored folder filtering during file collection
-    public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
-        return allImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: "")
-    }
     
     /// FIXED: New method that properly filters ignored folders during file discovery
     public nonisolated static func allImageFilesWithIgnoredFilter(
@@ -812,11 +596,22 @@ public enum ImageAnalyzer {
     }
     
     /// ENHANCED: Async version with chunked processing and ignored folder filtering
+    /// FIXED: Now respects topLevelOnly to prevent discovering new subfolders during analysis
     private nonisolated static func allImageFilesAsync(
         in directory: URL,
-        ignoredFolderName: String = "",  // FIXED: Added parameter
+        ignoredFolderName: String = "",
+        topLevelOnly: Bool = false,  // FIXED: Added topLevelOnly parameter
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [URL] {
+        // FIXED: If topLevelOnly is true, delegate to the top-level method
+        if topLevelOnly {
+            return await topLevelImageFilesAsync(
+                in: directory,
+                ignoredFolderName: ignoredFolderName,
+                shouldCancel: shouldCancel
+            )
+        }
+        
         var results: [URL] = []
         let fm = FileManager.default
         let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -858,12 +653,6 @@ public enum ImageAnalyzer {
         return results
     }
 
-    /// Finds image files only in the top level of a directory (non-recursive)
-    /// FIXED: Now properly handles ignored folder filtering
-    public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
-        return topLevelImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: "")
-    }
-    
     /// FIXED: New method that properly filters ignored subfolders during top-level scanning
     public nonisolated static func topLevelImageFilesWithIgnoredFilter(
         in directory: URL,
@@ -899,44 +688,12 @@ public enum ImageAnalyzer {
     /// ENHANCED: Async version with ignored folder filtering
     private nonisolated static func topLevelImageFilesAsync(
         in directory: URL,
-        ignoredFolderName: String = "",  // FIXED: Added parameter
+        ignoredFolderName: String = "",
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [URL] {
         if shouldCancel?() == true { return [] }
         
         return topLevelImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: ignoredFolderName)
-    }
-    
-    /// Helper to get all files from multiple directories
-    /// FIXED: Now properly passes through ignored folder filtering
-    private nonisolated static func getAllFilesAsync(
-        from directories: [URL],
-        topLevelOnly: Bool,
-        ignoredFolderName: String = "",  // FIXED: Added parameter
-        shouldCancel: (@Sendable () -> Bool)?
-    ) async -> [URL] {
-        var allFiles: [URL] = []
-        
-        for dir in directories {
-            if shouldCancel?() == true { break }
-            
-            let files = topLevelOnly
-                ? await topLevelImageFilesAsync(
-                    in: dir,
-                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass through
-                    shouldCancel: shouldCancel
-                )
-                : await allImageFilesAsync(
-                    in: dir,
-                    ignoredFolderName: ignoredFolderName,  // FIXED: Pass through
-                    shouldCancel: shouldCancel
-                )
-            
-            allFiles.append(contentsOf: files)
-            await Task.yield()
-        }
-        
-        return allFiles
     }
 
     /// Comprehensive list of supported image file extensions
@@ -1034,4 +791,99 @@ public enum ImageAnalyzer {
             }
         }
     }
+
+    // MARK: - Legacy methods for backward compatibility (NOT USED in new flow)
+    /// These methods are kept for potential future use but are NOT used in the main analysis flow
+    /// The new flow only processes exact folders passed from the sidebar
+    
+    /// Legacy method - not used in new flow
+    public nonisolated static func foldersToScan(from roots: [URL]) -> [URL] {
+        var out: [URL] = []
+        out.reserveCapacity(roots.count * 4)
+
+        for root in roots {
+            let subs = recursiveSubdirectoriesExcludingRoots(under: [root])
+            if subs.isEmpty {
+                out.append(root)
+            } else {
+                out.append(contentsOf: subs)
+            }
+        }
+
+        var seen = Set<URL>()
+        return out.filter { seen.insert($0.standardizedFileURL).inserted }
+    }
+    
+    /// Legacy method - not used in new flow
+    public nonisolated static func recursiveSubdirectoriesExcludingRootsAndIgnored(
+        under roots: [URL],
+        ignoredFolderName: String = ""
+    ) -> [URL] {
+        let fm = FileManager.default
+        var dirs: [URL] = []
+        dirs.reserveCapacity(256)
+        
+        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        for root in roots {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            if let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) {
+                while let element = enumerator.nextObject() {
+                    guard let url = element as? URL else { continue }
+                    if let r = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
+                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
+                        
+                        let folderName = url.lastPathComponent.lowercased()
+                        if !ignoredName.isEmpty && folderName == ignoredName {
+                            continue
+                        }
+                        
+                        dirs.append(url)
+                    }
+                }
+            }
+        }
+        return dirs
+    }
+    
+    /// Legacy method - not used in new flow
+    public nonisolated static func recursiveSubdirectoriesExcludingRoots(under roots: [URL]) -> [URL] {
+        let fm = FileManager.default
+        var dirs: [URL] = []
+        dirs.reserveCapacity(256)
+        for root in roots {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            if let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) {
+                while let element = enumerator.nextObject() {
+                    guard let url = element as? URL else { continue }
+                    if let r = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
+                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
+                        dirs.append(url)
+                    }
+                }
+            }
+        }
+        return dirs
+    }
+    
+    /// Legacy method - not used in new flow
+    public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
+        return allImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: "")
+    }
+    
+    /// Legacy method - not used in new flow
+    public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
+        return topLevelImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: "")
+    }
 }
+

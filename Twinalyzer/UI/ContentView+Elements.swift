@@ -521,15 +521,28 @@ extension ContentView {
         VStack(alignment: .leading, spacing: 16) {
             // Show folders if any have been discovered
             if !vm.discoveredLeafFolders.isEmpty {
+                
                 List {
+                    HStack {
+                        Image(systemName: "folder.fill")
+                             .font(.system(size: 14))
+                             .frame(width: 16, height: 16)
+                        
+                        Text("Selected Folders")
+                            .font(.title3)
+                        
+                    }
+
+                    Divider()
                     ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
 
                         HStack {
                             // Folder info: folder name and parent/folder structure
                             VStack(alignment: .leading, spacing: 2) {
+                                
                                 // PRIMARY: Just the folder name
                                 Text(leafURL.lastPathComponent)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.body)
                                     .lineLimit(1)
                                 
                                 // SECONDARY: Parent/folder structure (smaller, gray)

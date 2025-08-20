@@ -444,6 +444,7 @@ final class AppViewModel: ObservableObject {
     }
     
     // MARK: - Enhanced Analysis Operations
+
     /// Starts image analysis using the selected method (deep feature or perceptual hash)
     /// Manages progress tracking, cancellation, and result processing
     /// ENHANCED: Added throttled progress updates and memory pressure monitoring
@@ -455,8 +456,8 @@ final class AppViewModel: ObservableObject {
         isProcessing = true
         processingProgress = 0.0  // Start at 0% for immediate progress bar
 
-        // Capture current settings for the analysis task
-        let leafFolders = activeLeafFolders
+        // FIXED: Use exact folders from sidebar instead of root folders
+        let leafFolders = activeLeafFolders  // These are the exact folders shown in sidebar
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
         let ignoredFolder = ignoredFolderName  // Capture the ignored folder name
@@ -480,11 +481,11 @@ final class AppViewModel: ObservableObject {
             
             switch selectedAnalysisMode {
             case .deepFeature:
-                // AI-based analysis using Vision framework
+                // FIXED: Pass exact leaf folders instead of roots
                 results = await withTaskCancellationHandler {
                     await withCheckedContinuation { continuation in
                         ImageAnalyzer.analyzeWithDeepFeatures(
-                            inFolders: leafFolders,
+                            inFolders: leafFolders,  // FIXED: Use sidebar folders directly
                             similarityThreshold: threshold,
                             topLevelOnly: topOnly,
                             ignoredFolderName: ignoredFolder,
@@ -496,11 +497,11 @@ final class AppViewModel: ObservableObject {
                 } onCancel: {}
                 
             case .perceptualHash:
-                // Fast hash-based analysis for exact duplicates
+                // FIXED: Pass exact leaf folders instead of roots
                 results = await withTaskCancellationHandler {
                     await withCheckedContinuation { continuation in
                         ImageAnalyzer.analyzeWithPerceptualHash(
-                            inFolders: leafFolders,
+                            inFolders: leafFolders,  // FIXED: Use sidebar folders directly
                             similarityThreshold: threshold,
                             topLevelOnly: topOnly,
                             ignoredFolderName: ignoredFolder,
