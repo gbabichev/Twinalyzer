@@ -26,6 +26,7 @@ struct PreviewImage: View {
     @State private var hasAppeared: Bool = false   // Track if view has appeared (lazy loading)
     @State private var loadingTask: Task<Void, Never>?  // Cancellable loading task
     @State private var hasError: Bool = false      // Track if loading failed
+    @State private var currentPath: String = ""    // Track current path being loaded
     
     // MARK: - Constants
     private static let loadingTimeout: TimeInterval = 10.0  // 10 second timeout for image loading
@@ -51,8 +52,9 @@ struct PreviewImage: View {
     
     var body: some View {
         ZStack {
-            if let img = image {
+            if let img = image, currentPath == path {
                 // Display loaded image with aspect ratio preservation
+                // Only show if it matches the current path
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFit()
@@ -68,23 +70,31 @@ struct PreviewImage: View {
                 loadingPlaceholder
             }
         }
-        // LAZY LOADING: Only start loading when view appears
+        // IMMEDIATE LOADING: Start loading immediately when path changes
+        .onChange(of: path) { oldPath, newPath in
+            // Cancel any existing loading task immediately
+            cancelLoading()
+            
+            // Reset state for new path
+            if oldPath != newPath {
+                image = nil
+                hasError = false
+                currentPath = newPath
+                
+                // Start loading immediately
+                startLoading()
+            }
+        }
         .onAppear {
             if !hasAppeared {
                 hasAppeared = true
+                currentPath = path
                 startLoading()
             }
         }
         .onDisappear {
             // Cancel loading task when view disappears to save resources
             cancelLoading()
-        }
-        // Legacy support: Also trigger on cache key changes for existing usage patterns
-        .task(id: cacheKey) {
-            // Only load if we've appeared (prevents eager loading)
-            if hasAppeared && image == nil && !hasError {
-                startLoading()
-            }
         }
         // Accessibility support with filename as label
         .accessibilityLabel(Text((path as NSString).lastPathComponent))
@@ -131,10 +141,14 @@ struct PreviewImage: View {
     }
 
     /// Thread-safe image setter that must run on main thread for UI updates
-    @MainActor private func setImage(_ img: NSImage?) {
+    @MainActor private func setImage(_ img: NSImage?, forPath imagePath: String) {
+        // Only update if this is still the current path we're expecting
+        guard imagePath == self.path else { return }
+        
         self.image = img
         self.isLoading = false
-        self.hasError = (img == nil && self.isLoading) // Only set error if we were loading
+        self.hasError = (img == nil)
+        self.currentPath = imagePath
     }
     
     @MainActor private func setError() {
@@ -154,8 +168,9 @@ struct PreviewImage: View {
     private func startLoading() {
         guard loadingTask == nil else { return }
         
+        let pathToLoad = path // Capture current path
         loadingTask = Task(priority: priority) {
-            await load()
+            await load(pathToLoad)
         }
     }
     
@@ -176,29 +191,32 @@ struct PreviewImage: View {
     /// 3. Decode image off-main thread to avoid blocking UI
     /// 4. Create NSImage and update cache on main thread
     /// ENHANCED: Added timeout, memory pressure monitoring, and better error handling
-    private func load() async {
-        let key = cacheKey as NSString
+    private func load(_ pathToLoad: String) async {
+        let bucket = ImageProcessingUtilities.cacheBucket(for: maxDimension)
+        let key = "\(pathToLoad)::\(bucket)" as NSString
 
         // STAGE 1: Fast cache lookup on main thread
         // If image is already cached, display immediately without any async work
         if let cached = ImageCache.shared.object(forKey: key) {
-            setImage(cached)
+            setImage(cached, forPath: pathToLoad)
             return
         }
+
+        // Early cancellation check
+        guard !Task.isCancelled, pathToLoad == self.path else { return }
 
         // STAGE 2: Set loading state for better user experience
         setLoading(true)
 
         // STAGE 3: Check memory pressure before proceeding
         if await isMemoryPressureHigh() {
-            print("Warning: High memory pressure, skipping image load for \((path as NSString).lastPathComponent)")
+            print("Warning: High memory pressure, skipping image load for \((pathToLoad as NSString).lastPathComponent)")
             setError()
             return
         }
 
-        // STAGE 4: Determine target size and prepare for background processing
-        let bucket = ImageProcessingUtilities.cacheBucket(for: maxDimension)
-        let url = URL(fileURLWithPath: path)
+        // STAGE 4: Prepare for background processing
+        let url = URL(fileURLWithPath: pathToLoad)
 
         // STAGE 5: Decode image on background thread with timeout protection
         let cg: CGImage? = await withTimeout(seconds: Self.loadingTimeout) {
@@ -221,8 +239,8 @@ struct PreviewImage: View {
             }
         }
 
-        // STAGE 6: Final cancellation check and UI update
-        guard !Task.isCancelled else {
+        // STAGE 6: Final cancellation and path check
+        guard !Task.isCancelled, pathToLoad == self.path else {
             setLoading(false)
             return
         }
@@ -233,9 +251,7 @@ struct PreviewImage: View {
             await MainActor.run {
                 let ns = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
                 ImageCache.shared.setObject(ns, forKey: key)
-                self.image = ns
-                self.isLoading = false
-                self.hasError = false
+                setImage(ns, forPath: pathToLoad)
             }
         } else {
             setError()

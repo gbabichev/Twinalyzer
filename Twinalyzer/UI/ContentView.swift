@@ -51,8 +51,8 @@ struct ContentView: View {
         // Cancel existing timer
         selectionDebounceTimer?.invalidate()
         
-        // Set a new timer with 100ms delay
-        selectionDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { _ in
+        // Reduce debounce delay to 50ms for better responsiveness
+        selectionDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { _ in
             DispatchQueue.main.async {
                 self.debouncedSelection = self.tableSelection
             }
