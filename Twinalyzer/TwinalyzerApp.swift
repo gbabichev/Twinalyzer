@@ -107,6 +107,15 @@ struct ActionsCommands: Commands {
             .disabled(viewModel.selectedParentFolders.isEmpty || viewModel.isProcessing)
         }
 
+        CommandGroup(replacing: .help) {
+            Button("Twinalyzer Help") {
+                if let url = URL(string: "https://github.com/gbabichev/") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            .keyboardShortcut("?", modifiers: [.command])
+        }
+        
         CommandGroup(replacing: .appInfo) {
             Button("About Twinalyzer") {
                 openWindow(id: "AboutWindow")
