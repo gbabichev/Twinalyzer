@@ -229,8 +229,8 @@ extension ContentView {
                 } else {
                     // Empty state messaging based on current selection state
                     VStack(spacing: 8) {
-                        if vm.deletionSelection.count > 1 {
-                            Text("\(vm.deletionSelection.count) matches selected")
+                        if vm.selectedMatchesForDeletion.count > 1 {
+                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
                                 .foregroundStyle(.secondary)
                             Text("Press Delete or use toolbar button to delete selected matches")
                                 .foregroundStyle(.secondary)
@@ -407,14 +407,14 @@ extension ContentView {
                 HStack(spacing: 8) {
                     // Clickable deletion selection checkbox
                     Button(action: {
-                        if vm.deletionSelection.contains(row.id) {
-                            vm.deletionSelection.remove(row.id)
+                        if vm.selectedMatchesForDeletion.contains(row.id) {
+                            vm.selectedMatchesForDeletion.remove(row.id)
                         } else {
-                            vm.deletionSelection.insert(row.id)
+                            vm.selectedMatchesForDeletion.insert(row.id)
                         }
                     }) {
-                        Image(systemName: vm.deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
-                            .foregroundColor(vm.deletionSelection.contains(row.id) ? .blue : .secondary)
+                        Image(systemName: vm.selectedMatchesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
+                            .foregroundColor(vm.selectedMatchesForDeletion.contains(row.id) ? .blue : .secondary)
                     }
                     .buttonStyle(.plain)
                     .frame(width: 20)

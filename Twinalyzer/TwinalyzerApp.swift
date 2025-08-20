@@ -48,6 +48,7 @@ struct ActionsCommands: Commands {
             .keyboardShortcut("o", modifiers: [.command])
             .disabled(viewModel.isProcessing)
         }
+        
         CommandMenu("Actions") {
             if viewModel.isProcessing {
                 Button("Cancel Analysis") {
@@ -59,14 +60,13 @@ struct ActionsCommands: Commands {
                     viewModel.processImages(progress: { _ in })
                 }
                 .keyboardShortcut("p", modifiers: [.command])
+                .disabled(viewModel.activeLeafFolders.isEmpty)
             }
             
             Divider()
             
             // Delete Matches command - cmd+del
             Button("Delete Matches") {
-                // This will need to be implemented via the view model
-                // since we can't access ContentView's selection state directly
                 viewModel.deleteSelectedMatches()
             }
             .keyboardShortcut(.delete, modifiers: [.command])
@@ -79,12 +79,11 @@ struct ActionsCommands: Commands {
             .keyboardShortcut("l", modifiers: [.command, .option])
             .disabled(viewModel.isProcessing || !viewModel.hasSelectedMatches)
             
-            Divider()
-            
             Button("Clear All") {
                 viewModel.clearAll()
             }
             .keyboardShortcut("l", modifiers: [.command])
+            .disabled(viewModel.selectedParentFolders.isEmpty || viewModel.isProcessing)
         }
         
         CommandGroup(replacing: .appInfo) {

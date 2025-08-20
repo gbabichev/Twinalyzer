@@ -16,6 +16,7 @@ import ImageIO
 /// Central view model managing all app state, analysis operations, and UI coordination
 /// Implements ObservableObject for SwiftUI reactive updates
 /// All operations must run on MainActor for thread safety
+/// OPTIMIZED VERSION: Caches expensive computations to prevent recalculation on selection changes
 @MainActor
 final class AppViewModel: ObservableObject {
     
@@ -30,19 +31,41 @@ final class AppViewModel: ObservableObject {
     @AppStorage("scanTopLevelOnly") var scanTopLevelOnly: Bool = false // Limit to folder contents only
     @Published var isProcessing: Bool = false                 // Analysis in progress flag
     @Published var processingProgress: Double? = nil          // 0.0-1.0 or nil for indeterminate
-    @Published var comparisonResults: [ImageComparisonResult] = []  // Analysis results
+    @Published var comparisonResults: [ImageComparisonResult] = [] {  // Analysis results
+        didSet {
+            // PERFORMANCE OPTIMIZATION: Invalidate all cached values when results change
+            // This prevents stale cached data while maintaining performance during UI interactions
+            invalidateAllCaches()
+        }
+    }
     
-    // MARK: - Selection State Management
-    /// Moved from ContentView to enable menu bar commands to access selection state
-    @Published var deletionSelection: Set<String> = []        // Row IDs marked for deletion
+    // MARK: - Performance Cache Storage
+    /// Private cache variables to store expensive computations
+    /// These are invalidated whenever comparisonResults changes but persist during UI interactions
+    private var _flattenedResultsCache: [TableRow]?
+    private var _folderDuplicateCountsCache: [String: Int]?
+    private var _representativeImageByFolderCache: [String: String]?
+    private var _folderClustersCache: [[String]]?
+    private var _crossFolderDuplicateCountsCache: [String: Int]?
+    private var _flattenedResultsSortedCache: [TableRow]?
+    
+    /// Invalidates all cached computations - called when source data changes
+    private func invalidateAllCaches() {
+        _flattenedResultsCache = nil
+        _folderDuplicateCountsCache = nil
+        _representativeImageByFolderCache = nil
+        _folderClustersCache = nil
+        _crossFolderDuplicateCountsCache = nil
+        _flattenedResultsSortedCache = nil
+    }
     
     // MARK: - Task Management
     /// Simple cancellation mechanism for long-running analysis operations
     private var analysisTask: Task<Void, Never>?
     
-    // MARK: - Computed Properties (Derived State)
-    /// These properties derive their values from the core state above
-    /// This approach ensures consistency and eliminates redundant storage
+    // MARK: - Computed Properties (Non-Cached - These are lightweight)
+    /// These properties derive their values from simple state and remain uncached
+    /// They don't cause performance issues during selection changes
     
     /// All leaf folders discovered from parent selections (matches analysis engine behavior)
     /// Uses same logic as ImageAnalyzer.foldersToScan for consistency
@@ -61,20 +84,39 @@ final class AppViewModel: ObservableObject {
         activeLeafFolders.map { $0.lastPathComponent }.joined(separator: "\n")
     }
     
+    /// Sorted list of folders currently being processed (for progress display)
+    var allFoldersBeingProcessed: [URL] {
+        activeLeafFolders.sorted { $0.path < $1.path }
+    }
+    
+    // MARK: - Cached Computed Properties (PERFORMANCE OPTIMIZED)
+    /// These properties perform expensive computations and are cached to prevent
+    /// recalculation during UI interactions like table row selection changes
+    
     /// Flattens hierarchical results into table-friendly row format
-    /// Converts ImageComparisonResult (reference + similars) into individual TableRow pairs
-    /// Excludes self-references to avoid showing "image similar to itself"
+    /// CACHED: This was causing major performance issues during selection changes
     var flattenedResults: [TableRow] {
-        comparisonResults.flatMap { result in
+        if let cached = _flattenedResultsCache {
+            return cached
+        }
+        
+        let result = comparisonResults.flatMap { result in
             result.similars
                 .filter { $0.path != result.reference }
                 .map { TableRow(reference: result.reference, similar: $0.path, percent: $0.percent) }
         }
+        
+        _flattenedResultsCache = result
+        return result
     }
     
     /// Counts total duplicates found in each folder (including both references and matches)
-    /// Used for folder statistics and UI badges
+    /// CACHED: Used for folder statistics and UI badges
     var folderDuplicateCounts: [String: Int] {
+        if let cached = _folderDuplicateCountsCache {
+            return cached
+        }
+        
         var counts: [String: Int] = [:]
         for result in comparisonResults {
             let allPaths = [result.reference] + result.similars.map { $0.path }
@@ -83,12 +125,18 @@ final class AppViewModel: ObservableObject {
                 counts[folder, default: 0] += 1
             }
         }
+        
+        _folderDuplicateCountsCache = counts
         return counts
     }
     
     /// Maps each folder to a representative image for thumbnail display
-    /// Uses first discovered image as the folder's visual representative
+    /// CACHED: Uses first discovered image as the folder's visual representative
     var representativeImageByFolder: [String: String] {
+        if let cached = _representativeImageByFolderCache {
+            return cached
+        }
+        
         var representatives: [String: String] = [:]
         for result in comparisonResults {
             let allPaths = [result.reference] + result.similars.map { $0.path }
@@ -99,13 +147,18 @@ final class AppViewModel: ObservableObject {
                 }
             }
         }
+        
+        _representativeImageByFolderCache = representatives
         return representatives
     }
     
     /// Groups folders that share duplicate images into relationship clusters
-    /// Each cluster represents folders containing the same or similar images
-    /// Used for cross-folder duplicate visualization in the UI
+    /// CACHED: Each cluster represents folders containing the same or similar images
     var folderClusters: [[String]] {
+        if let cached = _folderClustersCache {
+            return cached
+        }
+        
         // Use flattened table data for accurate reference/match pairs
         var folderPairs: Set<[String]> = []
         
@@ -122,13 +175,18 @@ final class AppViewModel: ObservableObject {
         }
         
         // Return as array, sorted by first folder name for consistent display
-        return Array(folderPairs).sorted { $0[0] < $1[0] }
+        let result = Array(folderPairs).sorted { $0[0] < $1[0] }
+        _folderClustersCache = result
+        return result
     }
 
     /// Counts cross-folder duplicates per folder (excludes within-folder matches)
-    /// Used for displaying cross-folder duplicate badges in the UI
-    /// Each folder gets credit for both sending and receiving cross-folder duplicates
+    /// CACHED: Used for displaying cross-folder duplicate badges in the UI
     var crossFolderDuplicateCounts: [String: Int] {
+        if let cached = _crossFolderDuplicateCountsCache {
+            return cached
+        }
+        
         var counts: [String: Int] = [:]
         
         for row in flattenedResults {
@@ -143,34 +201,20 @@ final class AppViewModel: ObservableObject {
             counts[matchFolder, default: 0] += 1
         }
         
+        _crossFolderDuplicateCountsCache = counts
         return counts
     }
     
-    /// Sorted list of folders currently being processed (for progress display)
-    var allFoldersBeingProcessed: [URL] {
-        activeLeafFolders.sorted { $0.path < $1.path }
-    }
-    
     /// Flattened results pre-sorted by similarity percentage (highest first)
-    /// This ensures results always appear sorted without relying on Table sort state
+    /// CACHED: This ensures results always appear sorted without relying on Table sort state
     var flattenedResultsSorted: [TableRow] {
-        flattenedResults.sorted { $0.percent > $1.percent }
-    }
-    
-    // MARK: - Selection State Properties
-    /// Computed properties for menu command state management
-    
-    /// True if any matches are currently selected for deletion
-    var hasSelectedMatches: Bool {
-        !deletionSelection.isEmpty
-    }
-    
-    /// Extracts file paths from selected rows for batch deletion
-    /// IMPORTANT: Only returns the "similar" paths (matches), preserving references
-    /// This prevents accidentally deleting the reference images that other matches depend on
-    var selectedMatchPaths: [String] {
-        let selectedRows = flattenedResults.filter { deletionSelection.contains($0.id) }
-        return selectedRows.map { $0.similar } // Only delete the matched photos, not references
+        if let cached = _flattenedResultsSortedCache {
+            return cached
+        }
+        
+        let result = flattenedResults.sorted { $0.percent > $1.percent }
+        _flattenedResultsSortedCache = result
+        return result
     }
     
     // MARK: - User Actions
@@ -189,19 +233,6 @@ final class AppViewModel: ObservableObject {
         excludedLeafFolders.insert(leafURL)
     }
     
-    // MARK: - Selection Management
-    /// Clears the deletion selection (for menu command and UI button)
-    func clearSelection() {
-        deletionSelection.removeAll()
-    }
-    
-    /// Deletes all currently selected matches (for menu command and UI button)
-    func deleteSelectedMatches() {
-        guard !selectedMatchPaths.isEmpty else { return }
-        selectedMatchPaths.forEach(deleteFile)
-        deletionSelection.removeAll() // Clear selection after deletion
-    }
-
     // MARK: - Analysis Operations
     /// Starts image analysis using the selected method (deep feature or perceptual hash)
     /// Manages progress tracking, cancellation, and result processing
@@ -320,6 +351,29 @@ final class AppViewModel: ObservableObject {
                 )
             }
         }
+        
+        // Note: Cache invalidation happens automatically via comparisonResults didSet
+    }
+    
+    // MARK: - Selection Management for Menu Commands
+    /// Tracks selected matches for deletion (shared between ContentView and menu commands)
+    @Published var selectedMatchesForDeletion: Set<String> = []
+    
+    /// Computed property to check if any matches are selected for deletion
+    var hasSelectedMatches: Bool {
+        !selectedMatchesForDeletion.isEmpty
+    }
+    
+    /// Deletes currently selected matches (called from menu command)
+    func deleteSelectedMatches() {
+        let matchesToDelete = Array(selectedMatchesForDeletion)
+        deleteSelectedMatches(selectedMatches: matchesToDelete)
+        selectedMatchesForDeletion.removeAll()
+    }
+    
+    /// Clears the current selection (called from menu command)
+    func clearSelection() {
+        selectedMatchesForDeletion.removeAll()
     }
     
     // MARK: - State Management
@@ -333,10 +387,10 @@ final class AppViewModel: ObservableObject {
         selectedParentFolders.removeAll()
         excludedLeafFolders.removeAll()
         
-        // Clear all analysis results
-        comparisonResults.removeAll()
-        
         // Clear selection state
-        deletionSelection.removeAll()
+        selectedMatchesForDeletion.removeAll()
+        
+        // Clear all analysis results (this will automatically invalidate caches)
+        comparisonResults.removeAll()
     }
 }

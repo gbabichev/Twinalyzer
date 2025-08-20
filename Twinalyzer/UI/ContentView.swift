@@ -17,12 +17,16 @@ struct ContentView: View {
     @EnvironmentObject var vm: AppViewModel
     @State var showSettingsPopover = false
     
+    @State var debouncedSelection: Set<String> = []
+    @State var selectionDebounceTimer: Timer?
+    
+    
     // MARK: - Selection State Management
     // The app maintains two separate selection systems:
     // 1. tableSelection: Tracks which rows are focused/highlighted in the table (for navigation and preview)
-    // 2. deletionSelection: Now managed by the view model to enable menu bar commands
+    // 2. selectedMatchesForDeletion: Now managed by the view model to enable menu bar commands
     @State var tableSelection: Set<String> = [] // For table focus/navigation and preview
-    // deletionSelection is now managed by vm.deletionSelection
+    // selectedMatchesForDeletion is now managed by vm.selectedMatchesForDeletion
     
     // MARK: - Table Sorting
     @State var hasAutoSorted = false
@@ -44,8 +48,21 @@ struct ContentView: View {
     /// Uses the first item from tableSelection (table focus) to determine which row to show in the detail view
     /// Returns nil if no row is selected or if the selection doesn't match any existing row
     var selectedRow: TableRow? {
-        guard let firstID = tableSelection.first else { return nil }
+        guard let firstID = debouncedSelection.first else { return nil }
         return sortedRows.first(where: { $0.id == firstID })
+    }
+    
+    // Add debounced selection change handler
+    private func handleSelectionChange() {
+        // Cancel existing timer
+        selectionDebounceTimer?.invalidate()
+        
+        // Set a new timer with 100ms delay
+        selectionDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { _ in
+            DispatchQueue.main.async {
+                self.debouncedSelection = self.tableSelection
+            }
+        }
     }
     
     //MARK: - Main UI
@@ -107,7 +124,7 @@ struct ContentView: View {
             // RIGHT: Primary actions.
             ToolbarItemGroup(placement: .primaryAction) {
                 // Clear selection button - only shows when items are selected for deletion
-                if !vm.deletionSelection.isEmpty {
+                if !vm.selectedMatchesForDeletion.isEmpty {
                     Button {
                         vm.clearSelection()
                     } label: {
@@ -117,24 +134,24 @@ struct ContentView: View {
                                 .font(.caption)
                         }
                     }
-                    .help("Clear selection (\(vm.deletionSelection.count) item\(vm.deletionSelection.count == 1 ? "" : "s"))")
+                    .help("Clear selection (\(vm.selectedMatchesForDeletion.count) item\(vm.selectedMatchesForDeletion.count == 1 ? "" : "s"))")
                     .disabled(vm.isProcessing) // Disable during processing
                 }
                 
                 // Delete selected button - shows count and allows batch deletion
-                if !vm.deletionSelection.isEmpty {
+                if !vm.selectedMatchesForDeletion.isEmpty {
                     Button {
                         vm.deleteSelectedMatches()
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "trash")
-                            Text("\(vm.deletionSelection.count)")
+                            Text("\(vm.selectedMatchesForDeletion.count)")
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
                     }
                     .keyboardShortcut(.delete, modifiers: [])
-                    .help("Delete \(vm.deletionSelection.count) selected match\(vm.deletionSelection.count == 1 ? "" : "es")")
+                    .help("Delete \(vm.selectedMatchesForDeletion.count) selected match\(vm.selectedMatchesForDeletion.count == 1 ? "" : "es")")
                     .disabled(vm.isProcessing) // Disable during processing
                 }
                 
@@ -170,27 +187,27 @@ struct ContentView: View {
             // Handle multiple row selection: toggle all selected rows consistently
             if tableSelection.count > 1 {
                 // Check if all selected rows are already checked for deletion
-                let allChecked = tableSelection.allSatisfy { vm.deletionSelection.contains($0) }
+                let allChecked = tableSelection.allSatisfy { vm.selectedMatchesForDeletion.contains($0) }
                 
                 if allChecked {
                     // If all are checked, uncheck all
                     for rowID in tableSelection {
-                        vm.deletionSelection.remove(rowID)
+                        vm.selectedMatchesForDeletion.remove(rowID)
                     }
                 } else {
                     // If some/none are checked, check all
                     for rowID in tableSelection {
-                        vm.deletionSelection.insert(rowID)
+                        vm.selectedMatchesForDeletion.insert(rowID)
                     }
                 }
             } else {
                 // Single row selection: simple toggle
                 guard let focusedID = tableSelection.first else { return .handled }
                 
-                if vm.deletionSelection.contains(focusedID) {
-                    vm.deletionSelection.remove(focusedID)
+                if vm.selectedMatchesForDeletion.contains(focusedID) {
+                    vm.selectedMatchesForDeletion.remove(focusedID)
                 } else {
-                    vm.deletionSelection.insert(focusedID)
+                    vm.selectedMatchesForDeletion.insert(focusedID)
                 }
             }
             return .handled
@@ -221,6 +238,9 @@ struct ContentView: View {
             }
             
             return true
+        }
+        .onChange(of: tableSelection) { _, _ in
+            handleSelectionChange()
         }
     }
     
