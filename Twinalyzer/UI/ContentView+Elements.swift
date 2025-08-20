@@ -49,19 +49,20 @@ extension ContentView {
                         .foregroundStyle(.secondary)
                 } else {
                     // Scrollable list of folder paths with abbreviated display
-                    ScrollView(showsIndicators: true) {
+                    ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(vm.allFoldersBeingProcessed, id: \.self) { url in
                                 Text(DisplayHelpers.shortDisplayPath(for: url.path))
-                                    .font(.footnote)
+                                    .font(.body)
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
                             }
                         }
                     }
-                    .frame(maxHeight: 200)
+                    .frame(maxHeight: 200) // Only constrain height, let width be natural
                 }
             }
+            .fixedSize(horizontal: true, vertical: false) // Key addition: size to content width, flexible height
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
