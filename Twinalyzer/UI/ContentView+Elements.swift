@@ -209,8 +209,16 @@ extension ContentView {
                     .help("Enhanced Scan: AI-based analysis that can detect similar content even with different crops or lighting.\nAnything under ~66% produces lots of false positives. \n\nBasic Scan: Fast comparison using image fingerprints, good for exact duplicates.\nAnything under 80% produces lots of false positives.")
                 }
                 
-                // Segmented control for Deep Feature vs Perceptual Hash
-                Picker("", selection: $vm.selectedAnalysisMode) {
+                // FIXED: Use local state with deferred updates to prevent publishing during view updates
+                Picker("", selection: Binding(
+                    get: { vm.selectedAnalysisMode },
+                    set: { newValue in
+                        // Defer the update to the next run loop cycle
+                        DispatchQueue.main.async {
+                            vm.selectedAnalysisMode = newValue
+                        }
+                    }
+                )) {
                     ForEach(AnalysisMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
@@ -218,10 +226,22 @@ extension ContentView {
                 .pickerStyle(.segmented)
             }
             
-            // Similarity threshold slider with live percentage display
+            // FIXED: Similarity threshold slider with deferred updates
             VStack {
                 Text("Similarity Threshold")
-                Slider(value: $vm.similarityThreshold, in: 0.45...1.0, step: 0.01)
+                Slider(
+                    value: Binding(
+                        get: { vm.similarityThreshold },
+                        set: { newValue in
+                            // Defer the update to prevent publishing during view updates
+                            DispatchQueue.main.async {
+                                vm.similarityThreshold = newValue
+                            }
+                        }
+                    ),
+                    in: 0.45...1.0,
+                    step: 0.01
+                )
                 Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -229,7 +249,6 @@ extension ContentView {
         }
         .padding(20)
     }
-    
     // MARK: - Cross-Folder Duplicates Panel
     /// Top section of detail view showing folder relationships
     /// Groups folders that contain duplicate images across different directories
