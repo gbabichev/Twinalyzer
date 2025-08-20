@@ -32,6 +32,10 @@ final class AppViewModel: ObservableObject {
     @Published var processingProgress: Double? = nil          // 0.0-1.0 or nil for indeterminate
     @Published var comparisonResults: [ImageComparisonResult] = []  // Analysis results
     
+    // MARK: - Selection State Management
+    /// Moved from ContentView to enable menu bar commands to access selection state
+    @Published var deletionSelection: Set<String> = []        // Row IDs marked for deletion
+    
     // MARK: - Task Management
     /// Simple cancellation mechanism for long-running analysis operations
     private var analysisTask: Task<Void, Never>?
@@ -153,6 +157,22 @@ final class AppViewModel: ObservableObject {
         flattenedResults.sorted { $0.percent > $1.percent }
     }
     
+    // MARK: - Selection State Properties
+    /// Computed properties for menu command state management
+    
+    /// True if any matches are currently selected for deletion
+    var hasSelectedMatches: Bool {
+        !deletionSelection.isEmpty
+    }
+    
+    /// Extracts file paths from selected rows for batch deletion
+    /// IMPORTANT: Only returns the "similar" paths (matches), preserving references
+    /// This prevents accidentally deleting the reference images that other matches depend on
+    var selectedMatchPaths: [String] {
+        let selectedRows = flattenedResults.filter { deletionSelection.contains($0.id) }
+        return selectedRows.map { $0.similar } // Only delete the matched photos, not references
+    }
+    
     // MARK: - User Actions
     
     /// Adds new parent folders while filtering and deduplicating
@@ -169,6 +189,19 @@ final class AppViewModel: ObservableObject {
         excludedLeafFolders.insert(leafURL)
     }
     
+    // MARK: - Selection Management
+    /// Clears the deletion selection (for menu command and UI button)
+    func clearSelection() {
+        deletionSelection.removeAll()
+    }
+    
+    /// Deletes all currently selected matches (for menu command and UI button)
+    func deleteSelectedMatches() {
+        guard !selectedMatchPaths.isEmpty else { return }
+        selectedMatchPaths.forEach(deleteFile)
+        deletionSelection.removeAll() // Clear selection after deletion
+    }
+
     // MARK: - Analysis Operations
     /// Starts image analysis using the selected method (deep feature or perceptual hash)
     /// Manages progress tracking, cancellation, and result processing
@@ -302,5 +335,8 @@ final class AppViewModel: ObservableObject {
         
         // Clear all analysis results
         comparisonResults.removeAll()
+        
+        // Clear selection state
+        deletionSelection.removeAll()
     }
 }

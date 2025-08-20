@@ -20,9 +20,9 @@ struct ContentView: View {
     // MARK: - Selection State Management
     // The app maintains two separate selection systems:
     // 1. tableSelection: Tracks which rows are focused/highlighted in the table (for navigation and preview)
-    // 2. deletionSelection: Tracks which rows are marked for deletion via checkboxes (for batch operations)
+    // 2. deletionSelection: Now managed by the view model to enable menu bar commands
     @State var tableSelection: Set<String> = [] // For table focus/navigation and preview
-    @State var deletionSelection: Set<String> = [] // For actual deletion checkboxes and bulk operations
+    // deletionSelection is now managed by vm.deletionSelection
     
     // MARK: - Table Sorting
     @State var hasAutoSorted = false
@@ -107,36 +107,34 @@ struct ContentView: View {
             // RIGHT: Primary actions.
             ToolbarItemGroup(placement: .primaryAction) {
                 // Clear selection button - only shows when items are selected for deletion
-                if !deletionSelection.isEmpty {
+                if !vm.deletionSelection.isEmpty {
                     Button {
-                        deletionSelection.removeAll()
+                        vm.clearSelection()
                     } label: {
                         HStack(spacing: 4) {
-                            Label("Clear Selections", systemImage: "xmark.circle")
+                            Image(systemName: "xmark.circle")
                             Text("Clear")
                                 .font(.caption)
                         }
                     }
-                    .help("Clear selection (\(deletionSelection.count) item\(deletionSelection.count == 1 ? "" : "s"))")
+                    .help("Clear selection (\(vm.deletionSelection.count) item\(vm.deletionSelection.count == 1 ? "" : "s"))")
                     .disabled(vm.isProcessing) // Disable during processing
                 }
                 
                 // Delete selected button - shows count and allows batch deletion
-                if !deletionSelection.isEmpty {
+                if !vm.deletionSelection.isEmpty {
                     Button {
-                        vm.deleteSelectedMatches(selectedMatches: selectedMatchPaths)
-                        deletionSelection.removeAll() // Clear selection after deletion
+                        vm.deleteSelectedMatches()
                     } label: {
                         HStack(spacing: 4) {
-                            Label("Trash Matches", systemImage: "trash")
-                            //Image(systemName: "trash")
-                            Text("\(deletionSelection.count)")
+                            Image(systemName: "trash")
+                            Text("\(vm.deletionSelection.count)")
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
                     }
                     .keyboardShortcut(.delete, modifiers: [])
-                    .help("Delete \(deletionSelection.count) selected match\(deletionSelection.count == 1 ? "" : "es")")
+                    .help("Delete \(vm.deletionSelection.count) selected match\(vm.deletionSelection.count == 1 ? "" : "es")")
                     .disabled(vm.isProcessing) // Disable during processing
                 }
                 
@@ -154,7 +152,7 @@ struct ContentView: View {
                         // Clear both selection states when starting new analysis
                         // This prevents stale selections from previous results
                         tableSelection.removeAll()
-                        deletionSelection.removeAll()
+                        vm.clearSelection()
                         vm.processImages(progress: { _ in })
                     } label: {
                         Label("Analyze", systemImage: "wand.and.stars")
@@ -172,27 +170,27 @@ struct ContentView: View {
             // Handle multiple row selection: toggle all selected rows consistently
             if tableSelection.count > 1 {
                 // Check if all selected rows are already checked for deletion
-                let allChecked = tableSelection.allSatisfy { deletionSelection.contains($0) }
+                let allChecked = tableSelection.allSatisfy { vm.deletionSelection.contains($0) }
                 
                 if allChecked {
                     // If all are checked, uncheck all
                     for rowID in tableSelection {
-                        deletionSelection.remove(rowID)
+                        vm.deletionSelection.remove(rowID)
                     }
                 } else {
                     // If some/none are checked, check all
                     for rowID in tableSelection {
-                        deletionSelection.insert(rowID)
+                        vm.deletionSelection.insert(rowID)
                     }
                 }
             } else {
                 // Single row selection: simple toggle
                 guard let focusedID = tableSelection.first else { return .handled }
                 
-                if deletionSelection.contains(focusedID) {
-                    deletionSelection.remove(focusedID)
+                if vm.deletionSelection.contains(focusedID) {
+                    vm.deletionSelection.remove(focusedID)
                 } else {
-                    deletionSelection.insert(focusedID)
+                    vm.deletionSelection.insert(focusedID)
                 }
             }
             return .handled

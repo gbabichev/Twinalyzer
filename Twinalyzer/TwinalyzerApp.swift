@@ -38,7 +38,16 @@ struct TwinalyzerApp: App {
 struct ActionsCommands: Commands {
     @ObservedObject var viewModel: AppViewModel
     @Environment(\.openWindow) private var openWindow
+    
     var body: some Commands {
+        // Override the File menu to add Open command
+        CommandGroup(replacing: .newItem) {
+            Button("Open Folder...") {
+                selectFolders()
+            }
+            .keyboardShortcut("o", modifiers: [.command])
+            .disabled(viewModel.isProcessing)
+        }
         CommandMenu("Actions") {
             if viewModel.isProcessing {
                 Button("Cancel Analysis") {
@@ -54,6 +63,24 @@ struct ActionsCommands: Commands {
             
             Divider()
             
+            // Delete Matches command - cmd+del
+            Button("Delete Matches") {
+                // This will need to be implemented via the view model
+                // since we can't access ContentView's selection state directly
+                viewModel.deleteSelectedMatches()
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .disabled(viewModel.isProcessing || !viewModel.hasSelectedMatches)
+            
+            // Clear Selection command - cmd+opt+l
+            Button("Clear Selection") {
+                viewModel.clearSelection()
+            }
+            .keyboardShortcut("l", modifiers: [.command, .option])
+            .disabled(viewModel.isProcessing || !viewModel.hasSelectedMatches)
+            
+            Divider()
+            
             Button("Clear All") {
                 viewModel.clearAll()
             }
@@ -64,6 +91,22 @@ struct ActionsCommands: Commands {
             Button("About Twinalyzer") {
                 openWindow(id: "AboutWindow")
             }
+        }
+    }
+    
+    // MARK: - Helper Methods
+    /// Presents a native macOS folder picker for selecting parent directories
+    /// Configured to allow multiple directory selection for batch processing
+    /// Automatically adds selected folders to the view model for analysis
+    private func selectFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.title = "Select Parent Folders to Scan"
+        
+        if panel.runModal() == .OK {
+            viewModel.addParentFolders(panel.urls)
         }
     }
 }

@@ -72,15 +72,6 @@ public enum DisplayHelpers {
 // MARK: - ContentView Helper Extensions
 extension ContentView {
     
-    // MARK: - Selection Management
-    /// Extracts file paths from selected rows for batch deletion
-    /// IMPORTANT: Only returns the "similar" paths (matches), preserving references
-    /// This prevents accidentally deleting the reference images that other matches depend on
-    var selectedMatchPaths: [String] {
-        let selectedRows = sortedRows.filter { deletionSelection.contains($0.id) }
-        return selectedRows.map { $0.similar } // Only delete the matched photos, not references
-    }
-    
     // MARK: - Folder Selection Dialog
     /// Presents a native macOS folder picker for selecting parent directories
     /// Configured to allow multiple directory selection for batch processing
@@ -104,9 +95,8 @@ extension ContentView {
     func clearAll() {
         vm.clearAll()
         
-        // Clear both selection systems to prevent stale UI state
-        tableSelection.removeAll()    // Table focus/navigation selection
-        deletionSelection.removeAll() // Deletion checkbox selection
+        // Clear table focus/navigation selection
+        tableSelection.removeAll()
         sortOrder.removeAll()         // Table column sorting preferences
     }
 

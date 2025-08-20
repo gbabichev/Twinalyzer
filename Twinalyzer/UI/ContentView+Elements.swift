@@ -78,7 +78,7 @@ extension ContentView {
                             .font(.caption)
                     }
                     .buttonStyle(.plain)
-                    .help("Enhanced Scan: AI-based analysis that can detect similar content even with different crops or lighting.\n\nBasic Scan: Fast comparison using image fingerprints, good for exact duplicates.")
+                    .help("Enhanced Scan: AI-based analysis that can detect similar content even with different crops or lighting.\nAnything under ~66% produces lots of false positives. \n\nBasic Scan: Fast comparison using image fingerprints, good for exact duplicates.\nAnything under 80% produces lots of false positives.")
                 }
                 
                 // Segmented control for Deep Feature vs Perceptual Hash
@@ -93,7 +93,7 @@ extension ContentView {
             // Similarity threshold slider with live percentage display
             VStack {
                 Text("Similarity Threshold")
-                Slider(value: $vm.similarityThreshold, in: 0.45...1.0, step: 0.025)
+                Slider(value: $vm.similarityThreshold, in: 0.45...1.0, step: 0.01)
                 Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -229,8 +229,8 @@ extension ContentView {
                 } else {
                     // Empty state messaging based on current selection state
                     VStack(spacing: 8) {
-                        if deletionSelection.count > 1 {
-                            Text("\(deletionSelection.count) matches selected")
+                        if vm.deletionSelection.count > 1 {
+                            Text("\(vm.deletionSelection.count) matches selected")
                                 .foregroundStyle(.secondary)
                             Text("Press Delete or use toolbar button to delete selected matches")
                                 .foregroundStyle(.secondary)
@@ -407,14 +407,14 @@ extension ContentView {
                 HStack(spacing: 8) {
                     // Clickable deletion selection checkbox
                     Button(action: {
-                        if deletionSelection.contains(row.id) {
-                            deletionSelection.remove(row.id)
+                        if vm.deletionSelection.contains(row.id) {
+                            vm.deletionSelection.remove(row.id)
                         } else {
-                            deletionSelection.insert(row.id)
+                            vm.deletionSelection.insert(row.id)
                         }
                     }) {
-                        Image(systemName: deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
-                            .foregroundColor(deletionSelection.contains(row.id) ? .blue : .secondary)
+                        Image(systemName: vm.deletionSelection.contains(row.id) ? "checkmark.square.fill" : "square")
+                            .foregroundColor(vm.deletionSelection.contains(row.id) ? .blue : .secondary)
                     }
                     .buttonStyle(.plain)
                     .frame(width: 20)
