@@ -25,14 +25,19 @@ struct ContentView: View {
     @State var deletionSelection: Set<String> = [] // For actual deletion checkboxes and bulk operations
     
     // MARK: - Table Sorting
+    @State var hasAutoSorted = false
     @State var sortOrder: [KeyPathComparator<TableRow>] = [] // User-configurable sort order for table columns
     
     /// Returns the table rows sorted according to user preferences
     /// If no sort order is specified, returns rows in their natural order from the view model
     var sortedRows: [TableRow] {
-        let rows = vm.flattenedResults
-        guard !sortOrder.isEmpty else { return rows }
-        return rows.sorted(using: sortOrder)
+        // Use pre-sorted results if no custom sort order is applied
+        if sortOrder.isEmpty {
+            return vm.flattenedResultsSorted
+        } else {
+            // Apply custom sort order when user has manually sorted columns
+            return vm.flattenedResults.sorted(using: sortOrder)
+        }
     }
     
     /// Returns the currently focused/selected row for preview display

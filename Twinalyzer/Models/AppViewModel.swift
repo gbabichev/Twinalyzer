@@ -147,6 +147,12 @@ final class AppViewModel: ObservableObject {
         activeLeafFolders.sorted { $0.path < $1.path }
     }
     
+    /// Flattened results pre-sorted by similarity percentage (highest first)
+    /// This ensures results always appear sorted without relying on Table sort state
+    var flattenedResultsSorted: [TableRow] {
+        flattenedResults.sorted { $0.percent > $1.percent }
+    }
+    
     // MARK: - User Actions
     
     /// Adds new parent folders while filtering and deduplicating
