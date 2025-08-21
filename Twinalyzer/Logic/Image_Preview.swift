@@ -28,7 +28,8 @@ struct PreviewImage: View {
     @State private var loadingTask: Task<Void, Never>?  // Cancellable loading task
     @State private var hasError: Bool = false     // Track if loading failed
     @State private var currentPath: String = ""   // Track current path being loaded
-    
+    @State private var loadingDebounceTimer: Timer?
+
     // MARK: - Constants
     private static let loadingTimeout: TimeInterval = 10.0  // 10 second timeout for image loading
     fileprivate let MEMORY_PRESSURE_THRESHOLD: UInt64 = 512 * 1024 * 1024
@@ -147,14 +148,27 @@ struct PreviewImage: View {
     // MARK: - Loading Management
     private func startLoading() {
         guard loadingTask == nil else { return }
+        
+        // Cancel any existing debounce timer
+        loadingDebounceTimer?.invalidate()
+        
+        // Debounce rapid selection changes (50ms delay)
+        loadingDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { _ in
+            self.loadingDebounceTimer = nil
+            self.startActualLoading()
+        }
+    }
+
+    private func startActualLoading() {
         let pathToLoad = path
         loadingTask = Task(priority: priority) {
             await load(pathToLoad)
-            await MainActor.run { self.loadingTask = nil }
         }
     }
-    
+
     private func cancelLoading() {
+        loadingDebounceTimer?.invalidate()
+        loadingDebounceTimer = nil
         loadingTask?.cancel()
         loadingTask = nil
     }

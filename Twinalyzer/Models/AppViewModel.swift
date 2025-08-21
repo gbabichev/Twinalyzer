@@ -68,6 +68,8 @@ final class AppViewModel: ObservableObject {
     @Published var folderClustersStatic: [[String]] = []
     @Published var representativeImageByFolderStatic: [String: String] = [:]
     @Published var crossFolderDuplicateCountsStatic: [String: Int] = [:]
+    @Published var folderDisplayNamesStatic: [String: String] = [:]
+
     
     // MARK: - Performance Cache Storage (ephemeral / derived)
     private var _flattenedResultsCache: [TableRow]?
@@ -458,14 +460,26 @@ final class AppViewModel: ObservableObject {
         
         // 1) Representative image per folder
         var reps: [String: String] = [:]
+        // 4) Display names cache
+        var displayNames: [String: String] = [:]
+        
         for row in rows {
             let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
             let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            
             if reps[refFolder] == nil { reps[refFolder] = row.reference }
             if reps[matchFolder] == nil { reps[matchFolder] = row.similar }
+            
+            // Cache display names
+            if displayNames[refFolder] == nil {
+                displayNames[refFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: refFolder))
+            }
+            if displayNames[matchFolder] == nil {
+                displayNames[matchFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: matchFolder))
+            }
         }
         
-        // 2) Cross‑folder counts (bidirectional)
+        // 2) Cross-folder counts (bidirectional)
         var counts: [String: Int] = [:]
         for row in rows {
             let ref = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
@@ -489,8 +503,8 @@ final class AppViewModel: ObservableObject {
         self.representativeImageByFolderStatic = reps
         self.crossFolderDuplicateCountsStatic = counts
         self.folderClustersStatic = clusters
+        self.folderDisplayNamesStatic = displayNames
     }
-    
     /// Cancels the current analysis operation and resets processing state
     func cancelAnalysis() {
         cancelAllOperations()
@@ -578,6 +592,7 @@ final class AppViewModel: ObservableObject {
         folderClustersStatic.removeAll()
         representativeImageByFolderStatic.removeAll()
         crossFolderDuplicateCountsStatic.removeAll()
+        folderDisplayNamesStatic.removeAll()
     }
     
     // MARK: - Memory Pressure Monitoring

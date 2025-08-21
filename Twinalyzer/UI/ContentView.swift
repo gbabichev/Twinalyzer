@@ -316,11 +316,17 @@ struct ContentView: View {
     // MARK: - Preview Layout (simplified - no more complex display helpers)
     @ViewBuilder
     func renderPreview(for row: TableRow, size: CGSize) -> some View {
+        // Calculate layout dimensions based on available space
         let spacing: CGFloat = 20
         let inset: CGFloat = 16
         let twoColumnWidth = max(0, size.width - spacing - inset * 2)
         let singleColumn = twoColumnWidth / 2
         let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
+        
+        // Pre-compute paths to avoid URL processing during render
+        let refDisplayPath = DisplayHelpers.shortDisplayPath(for: row.reference)
+        let simDisplayPath = DisplayHelpers.shortDisplayPath(for: row.similar)
+        let isCrossFolder = DisplayHelpers.isCrossFolder(row)
         
         HStack(alignment: .top, spacing: spacing) {
             // Left side: Reference image
@@ -329,13 +335,13 @@ struct ContentView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                Text(row.referenceShort)
+                Text(refDisplayPath)
                     .font(.caption)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .multilineTextAlignment(.center)
                 
-                PreviewImage(path: row.reference, maxDimension: maxDim, priority: .userInitiated)
+                PreviewImage(path: row.reference, maxDimension: maxDim)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
                     .clipped()
                 
@@ -353,14 +359,14 @@ struct ContentView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                Text(row.similarShort)
+                Text(simDisplayPath)
                     .font(.caption)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                    .foregroundStyle(isCrossFolder ? .red : .primary)
                 
-                PreviewImage(path: row.similar, maxDimension: maxDim, priority: .utility)
+                PreviewImage(path: row.similar, maxDimension: maxDim)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
                     .clipped()
                 
@@ -375,4 +381,5 @@ struct ContentView: View {
         .padding(inset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
+
 }
