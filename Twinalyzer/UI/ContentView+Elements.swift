@@ -19,6 +19,11 @@ struct ScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
+private struct FolderRowKey: Hashable {
+    let section: Int
+    let folder: String
+}
+
 extension ContentView {
     
     // MARK: - Processing View
@@ -295,67 +300,63 @@ extension ContentView {
     /// Groups folders that contain duplicate images across different directories
     var duplicatesFolderPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Header with count of folder relationships
             HStack {
                 Text("Cross-Folder Duplicates")
-                    .font(.headline)
-                    .fontWeight(.semibold)
+                    .font(.headline).fontWeight(.semibold)
                 Spacer()
                 if !vm.folderClusters.isEmpty {
                     Text("\(vm.folderClusters.count) relationship\(vm.folderClusters.count == 1 ? "" : "s")")
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
+                        .foregroundStyle(.secondary).font(.subheadline)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            
-            // Empty state when no cross-folder duplicates found
+            .padding(.horizontal, 12).padding(.top, 8)
+
             if vm.folderClusters.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "folder.badge.questionmark")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.secondary)
-                    
+                        .font(.system(size: 24)).foregroundStyle(.secondary)
                     Text("No cross-folder duplicate relationships found.")
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                    
+                        .foregroundStyle(.secondary).font(.subheadline)
                     Text("Run an analysis to discover duplicates between different folders.")
-                        .foregroundStyle(.tertiary)
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.tertiary).font(.caption)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                // List of folder groups that share duplicate images
-                List {
-                    ForEach(Array(vm.folderClusters.enumerated()), id: \.offset) { i, cluster in
-                        Section {
-                            ForEach(cluster.indices, id: \.self) { j in
-                                let folder = cluster[j]
-                                folderRow(folder: folder)
-                            }
-                        } header: {
+                // Use a local to avoid the Binding/C overload confusion
+                let clusters: [[String]] = vm.folderClusters
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        // Concrete Range avoids tuple key-paths & Binding overloads
+                        ForEach(0..<clusters.count, id: \.self) { sectionIndex in
+                            let cluster = clusters[sectionIndex]
+
                             HStack {
-                                Text("Group \(i + 1)")
-                                    .font(.caption)
-                                    .fontWeight(.medium)
+                                Text("Group \(sectionIndex + 1)")
+                                    .font(.caption).fontWeight(.medium)
                                 Spacer()
                                 Text("\(cluster.count) folder\(cluster.count == 1 ? "" : "s")")
-                                    .foregroundStyle(.secondary)
-                                    .font(.caption2)
+                                    .foregroundStyle(.secondary).font(.caption2)
                             }
+                            .padding(.horizontal, 12)
+
+                            // Unique identity per group+folder fixes duplicate-ID warning
+                            ForEach(cluster, id: \.self) { folder in
+                                folderRow(folder: folder)
+                                    .id(FolderRowKey(section: sectionIndex, folder: folder))
+                                    .padding(.horizontal, 8)
+                            }
+
+                            Divider().padding(.horizontal, 8)
                         }
                     }
                 }
-                .listStyle(.sidebar)
+                .frame(maxHeight: 200)
             }
-            
+
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
     }
 
     /// Individual folder row in the cross-folder duplicates list
@@ -454,14 +455,14 @@ extension ContentView {
                     .fontWeight(.medium)
                 
                 // Shortened path display
-                Text(DisplayHelpers.shortDisplayPath(for: row.reference))
+                Text(row.referenceShort)
                     .font(.caption)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .multilineTextAlignment(.center)
                 
                 // Reference image with border
-                PreviewImage(path: row.reference, maxDimension: maxDim)
+                PreviewImage(path: row.reference, maxDimension: maxDim, priority: .userInitiated)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
                     .clipped()
 //                    .overlay(
@@ -485,15 +486,16 @@ extension ContentView {
                     .fontWeight(.medium)
                 
                 // Match path with cross-folder highlighting
-                Text(DisplayHelpers.shortDisplayPath(for: row.similar))
+                Text(row.similarShort)
                     .font(.caption)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
+
                 
                 // Match image with conditional red border for cross-folder duplicates
-                PreviewImage(path: row.similar, maxDimension: maxDim)
+                PreviewImage(path: row.similar, maxDimension: maxDim, priority: .utility)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
                     .clipped()
 //                    .overlay(
@@ -602,34 +604,27 @@ extension ContentView {
         Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
             // Reference column with deletion checkbox
             TableColumn("Reference", value: \.reference) { row in
-                HStack(spacing: 8) {
-                    // Clickable deletion selection checkbox
-                    Button(action: {
-                        if vm.selectedMatchesForDeletion.contains(row.id) {
-                            vm.selectedMatchesForDeletion.remove(row.id)
-                        } else {
-                            vm.selectedMatchesForDeletion.insert(row.id)
-                        }
-                    }) {
-                        Image(systemName: vm.selectedMatchesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
-                            .foregroundColor(vm.selectedMatchesForDeletion.contains(row.id) ? .blue : .secondary)
+                let isMarked = vm.selectedMatchesForDeletion.contains(row.id)
+                RefCell(
+                    id: row.id,
+                    isMarked: isMarked,
+                    referenceShort: row.referenceShort,
+                    isCrossFolder: row.isCrossFolder,
+                    toggle: {
+                        if isMarked { vm.selectedMatchesForDeletion.remove(row.id) }
+                        else        { vm.selectedMatchesForDeletion.insert(row.id) }
                     }
-                    .buttonStyle(.plain)
-                    .frame(width: 20)
-                    
-                    // Reference file path with cross-folder highlighting
-                    Text(DisplayHelpers.shortDisplayPath(for: row.reference))
-                        .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                )
+                .equatable() // <-- important
             }
             .width(min: 200, ideal: 250)
+
+
             
             // Match column showing similar image path
             TableColumn("Match", value: \.similar) { row in
-                Text(DisplayHelpers.shortDisplayPath(for: row.similar))
-                    .foregroundStyle(DisplayHelpers.isCrossFolder(row) ? .red : .primary)
+                Text(row.similarShort)
+                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -641,6 +636,8 @@ extension ContentView {
             }.width(80)
         }
         .tableStyle(.automatic)
+        .transaction { $0.animation = nil }
+        .environment(\.defaultMinListRowHeight, 18)
         .navigationTitle("Results")
         .focused($isTableFocused)
         .onAppear {
@@ -667,6 +664,37 @@ extension ContentView {
                 .frame(minHeight: 200)
         }
     }
+ 
+    private struct RefCell: View, Equatable {
+        let id: String
+        let isMarked: Bool
+        let referenceShort: String
+        let isCrossFolder: Bool
+        let toggle: () -> Void
+
+        static func == (lhs: RefCell, rhs: RefCell) -> Bool {
+            lhs.id == rhs.id &&
+            lhs.isMarked == rhs.isMarked &&
+            lhs.referenceShort == rhs.referenceShort &&
+            lhs.isCrossFolder == rhs.isCrossFolder
+        }
+
+        var body: some View {
+            HStack(spacing: 8) {
+                Button(action: toggle) {
+                    Image(systemName: isMarked ? "checkmark.square.fill" : "square")
+                        .foregroundColor(isMarked ? .blue : .secondary)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 20)
+
+                Text(referenceShort)
+                    .foregroundStyle(isCrossFolder ? .red : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+    }
     
 }
 
@@ -678,3 +706,50 @@ struct ContentSizePreferenceKey: PreferenceKey {
         value = nextValue()
     }
 }
+
+private struct FolderRowView: View, Equatable {
+    let folder: String
+    let displayName: String
+    let imagePath: String?
+    let dupes: Int
+    let open: () -> Void
+
+    static func == (lhs: FolderRowView, rhs: FolderRowView) -> Bool {
+        lhs.folder == rhs.folder &&
+        lhs.displayName == rhs.displayName &&
+        lhs.imagePath == rhs.imagePath &&
+        lhs.dupes == rhs.dupes
+    }
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Text(displayName)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 6) {
+                    if let imagePath {
+                        PreviewImage(path: imagePath, maxDimension: 24, priority: .utility)
+                            .frame(width: 24, height: 24)
+                            .clipped()
+                            .cornerRadius(3)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(.gray.opacity(0.25), lineWidth: 1))
+                            .allowsHitTesting(false)
+                    }
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("\(dupes)").font(.system(size: 14, weight: .semibold))
+                        Text("dupes").font(.system(size: 8)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+        .help("Folder: \(folder)")
+    }
+}
+

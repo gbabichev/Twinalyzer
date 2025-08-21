@@ -50,21 +50,43 @@ public enum AnalysisMode: String, CaseIterable, Identifiable, RawRepresentable {
 /// Used primarily for table/list display in the UI where each row shows one comparison pair
 /// Forms the basic building block for all duplicate visualizations
 public struct TableRow: Identifiable, Hashable, Sendable {
-    /// Unique identifier combining both file paths for stable row identity
-    /// Format: "reference_path::similar_path" ensures each comparison pair has unique ID
     public var id: String { reference + "::" + similar }
-    
-    public let reference: String    // File path of the reference image (typically chosen as "original")
-    public let similar: String      // File path of the matching/duplicate image
-    public let percent: Double      // Similarity percentage (0.0 to 1.0)
-    
-    /// Initializer marked nonisolated for Swift 6 concurrency compliance
+
+    public let reference: String
+    public let similar: String
+    public let percent: Double
+
+    // NEW: precomputed display + flag
+    public let referenceShort: String
+    public let similarShort: String
+    public let isCrossFolder: Bool
+
     public nonisolated init(reference: String, similar: String, percent: Double) {
         self.reference = reference
         self.similar = similar
         self.percent = percent
+
+        // Precompute short paths (last two components) & cross-folder flag
+        let refURL = URL(fileURLWithPath: reference)
+        let simURL = URL(fileURLWithPath: similar)
+
+        self.referenceShort = TableRow.shortDisplayPath(refURL)
+        self.similarShort  = TableRow.shortDisplayPath(simURL)
+
+        let refFolder = refURL.deletingLastPathComponent().path
+        let simFolder = simURL.deletingLastPathComponent().path
+        self.isCrossFolder = (refFolder != simFolder)
+    }
+
+    // Same logic your DisplayHelpers used, but kept local to the model
+    private nonisolated static func shortDisplayPath(_ url: URL) -> String {
+        let components = url.pathComponents
+        return components.count >= 2
+            ? components.suffix(2).joined(separator: "/")
+            : url.lastPathComponent
     }
 }
+
 
 /// Hierarchical representation of duplicate groups with one reference and multiple matches
 /// This is the primary output format from the analysis engine
@@ -117,3 +139,4 @@ extension TableRow {
         "\(percentInt)%"
     }
 }
+

@@ -28,7 +28,6 @@ struct ContentView: View {
     @State var selectionDebounceTimer: Timer?
     @FocusState var isTableFocused: Bool
 
-    
     // MARK: - Selection State Management
     // The app maintains two separate selection systems:
     // 1. tableSelection: Tracks which rows are focused/highlighted in the table (for navigation and preview)
