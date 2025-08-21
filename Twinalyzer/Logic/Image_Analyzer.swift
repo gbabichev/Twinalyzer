@@ -435,10 +435,19 @@ public enum ImageAnalyzer {
                 let distance = hammingDistance(hashes[i].hash, hashes[j].hash)
                 if distance <= maxDist {
                     let similarity = 1.0 - (Double(distance) / 64.0)
-                    pairs.append(TableRow(
-                        reference: hashes[i].path,
-                        similar: hashes[j].path,
-                        percent: similarity
+                    let refPath = hashes[i].path
+                    let simPath = hashes[j].path
+                    let id = "\(refPath)::\(simPath)"
+                    let refFolder = URL(fileURLWithPath: refPath).deletingLastPathComponent().path
+                    let simFolder = URL(fileURLWithPath: simPath).deletingLastPathComponent().path
+                    let cross = (refFolder != simFolder)
+                    
+                    await pairs.append(TableRow(
+                        id: id,
+                        reference: refPath,
+                        similar: simPath,
+                        percent: similarity,
+                        isCrossFolder: cross
                     ))
                 }
             }

@@ -30,60 +30,6 @@ public enum AnalysisMode: String, CaseIterable, Identifiable, RawRepresentable {
     }
 }
 
-// MARK: - Simplified TableRow with Native Sorting Support
-/// Simplified table row that works perfectly with SwiftUI's native Table sorting
-/// All computed properties are lightweight and work great with KeyPath-based sorting
-public struct TableRow: Identifiable, Hashable, Sendable {
-    public var id: String { reference + "::" + similar }
-    
-    public let reference: String
-    public let similar: String
-    public let percent: Double
-    
-    // MARK: - Computed Properties for Native Sorting
-    /// Short display path for reference (last 2 components)
-    public var referenceShort: String {
-        let url = URL(fileURLWithPath: reference)
-        let components = url.pathComponents
-        return components.count >= 2 ? components.suffix(2).joined(separator: "/") : url.lastPathComponent
-    }
-    
-    /// Short display path for similar (last 2 components)
-    public var similarShort: String {
-        let url = URL(fileURLWithPath: similar)
-        let components = url.pathComponents
-        return components.count >= 2 ? components.suffix(2).joined(separator: "/") : url.lastPathComponent
-    }
-    
-    /// Cross-folder detection for sorting and display
-    public var isCrossFolder: Bool {
-        let refFolder = URL(fileURLWithPath: reference).deletingLastPathComponent().path
-        let simFolder = URL(fileURLWithPath: similar).deletingLastPathComponent().path
-        return refFolder != simFolder
-    }
-    
-    /// Cross-folder as sortable string ("Yes"/"No")
-    public var crossFolderText: String {
-        isCrossFolder ? "Yes" : "No"
-    }
-    
-    /// Integer percentage for display
-    public var percentInt: Int {
-        Int((percent * 100).rounded())
-    }
-    
-    /// Display percentage with % symbol
-    public var percentDisplay: String {
-        "\(percentInt)%"
-    }
-    
-    public nonisolated init(reference: String, similar: String, percent: Double) {
-        self.reference = reference
-        self.similar = similar
-        self.percent = percent
-    }
-}
-
 // MARK: - Hierarchical Result (unchanged)
 public struct ImageComparisonResult: Identifiable, Sendable, Equatable, Hashable {
     public let id: UUID

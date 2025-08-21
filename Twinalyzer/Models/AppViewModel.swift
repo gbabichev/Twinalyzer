@@ -28,12 +28,38 @@ final class AppViewModel: ObservableObject {
     
     @Published private(set) var activeSortedRows: [TableRow] = []
     @Published private(set) var rowIndexByID: [String: Int] = [:]
-    
+    private var sortComputeTask: Task<[TableRow], Never>? = nil
     func applySort(_ sortOrder: [KeyPathComparator<TableRow>]) {
-        let rows = getSortedRows(using: sortOrder)   // hits your cache once
-        activeSortedRows = rows                      // freeze for UI
-        // O(1) lookup for selected row -> avoids first(where:) scans
-        rowIndexByID = Dictionary(uniqueKeysWithValues: rows.enumerated().map { ($1.id, $0) })
+        // 1) Serve from cache immediately if available
+        let cacheKey = sortCacheKey(for: sortOrder)
+        if let cached = _sortedResultsCache[cacheKey] {
+            activeSortedRows = cached
+            rowIndexByID = Dictionary(uniqueKeysWithValues: cached.enumerated().map { ($1.id, $0) })
+            return
+        }
+
+        // 2) Snapshot data on main (value-copy) before hopping off-main
+        let base = self.flattenedResults
+
+        // 3) Cancel any in-flight sort to avoid races on rapid header clicks
+        sortComputeTask?.cancel()
+        sortComputeTask = Task.detached(priority: .userInitiated) {
+            if sortOrder.isEmpty {
+                return base
+            } else {
+                return base.sorted(using: sortOrder)
+            }
+        }
+
+        // 4) Publish results on main, update cache + index map
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let rows = await self.sortComputeTask?.value else { return }
+            self._sortedResultsCache[cacheKey] = rows
+            self.activeSortedRows = rows
+            self.rowIndexByID = Dictionary(uniqueKeysWithValues: rows.enumerated().map { ($1.id, $0) })
+            self.sortComputeTask = nil
+        }
     }
     
     
@@ -107,7 +133,21 @@ final class AppViewModel: ObservableObject {
         let result = comparisonResults.flatMap { result in
             result.similars
                 .filter { $0.path != result.reference }
-                .map { TableRow(reference: result.reference, similar: $0.path, percent: $0.percent) }
+                .map { similar in
+                    let refPath = result.reference
+                    let simPath = similar.path
+                    let id = "\(refPath)::\(simPath)"
+                    let refFolder = URL(fileURLWithPath: refPath).deletingLastPathComponent().path
+                    let simFolder = URL(fileURLWithPath: simPath).deletingLastPathComponent().path
+                    let cross = (refFolder != simFolder)
+                    return TableRow(
+                        id: id,
+                        reference: refPath,
+                        similar: simPath,
+                        percent: similar.percent,
+                        isCrossFolder: cross
+                    )
+                }
         }
         _flattenedResultsCache = result
         return result
@@ -194,7 +234,7 @@ final class AppViewModel: ObservableObject {
         if let cached = _sortedResultsCache[cacheKey] { return cached }
         let sorted: [TableRow]
         if sortOrder.isEmpty {
-            sorted = flattenedResultsSorted
+            sorted = flattenedResults
         } else {
             sorted = flattenedResults.sorted(using: sortOrder)
         }
@@ -677,3 +717,41 @@ final class AppViewModel: ObservableObject {
     }
 }
 
+// MARK: - Simplified TableRow with Native Sorting Support
+/// Simplified table row that works perfectly with SwiftUI's native Table sorting
+/// All computed properties are lightweight and work great with KeyPath-based sorting
+public struct TableRow: Identifiable, Hashable {
+    public let id: String
+    let reference: String
+    let similar: String
+    let percent: Double
+    let isCrossFolder: Bool
+
+    // Cached short strings (computed once to keep sorting cheap)
+    let referenceShort: String
+    let similarShort: String
+    // Lowercased caches in case you later need case-insensitive compares
+    let referenceShortLower: String
+    let similarShortLower: String
+
+    var crossFolderText: String { isCrossFolder ? "YES" : "" }
+    var percentDisplay: String {
+        let clamped = max(0.0, min(1.0, percent))
+        return String(format: "%.1f%%", clamped * 100)
+    }
+    init(id: String, reference: String, similar: String, percent: Double, isCrossFolder: Bool) {
+        self.id = id
+        self.reference = reference
+        self.similar = similar
+        self.percent = percent
+        self.isCrossFolder = isCrossFolder
+
+        // Compute short strings ONCE (avoid recomputation during sort)
+        let refShort = DisplayHelpers.shortDisplayPath(for: reference)
+        let simShort = DisplayHelpers.shortDisplayPath(for: similar)
+        self.referenceShort = refShort
+        self.similarShort = simShort
+        self.referenceShortLower = refShort.lowercased()
+        self.similarShortLower = simShort.lowercased()
+    }
+}
