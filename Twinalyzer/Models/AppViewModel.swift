@@ -1,8 +1,10 @@
 /*
- 
- AppViewModel.swift - Simplified Version
+
+ AppViewModel.swift
  Twinalyzer
- 
+
+ George Babichev
+
  */
 
 import SwiftUI
@@ -11,10 +13,11 @@ import Combine
 import ImageIO
 import UniformTypeIdentifiers
 
+// MARK: - Main Application State Manager
 @MainActor
 final class AppViewModel: ObservableObject {
     
-    // MARK: - CSV Export
+    //MARK: - CSV
     @Published var isExportingCSV = false
     @Published var csvDocument: CSVDocument? = nil
     @Published var exportFilename: String = "Results"
@@ -35,26 +38,39 @@ final class AppViewModel: ObservableObject {
     @Published var isProcessing: Bool = false
     @Published var processingProgress: Double? = nil
     @Published var isDiscoveringFolders: Bool = false
-    @Published var comparisonResults: [ImageComparisonResult] = []
+    @Published var comparisonResults: [ImageComparisonResult] = [] {
+        didSet { invalidateAllCaches() }
+    }
+    
+    // MARK: - 🔒 STATIC SNAPSHOT (does not change with sorting)
+    /// These three drive the “Cross‑Folder Duplicates” panel and are only
+    /// recomputed right after an analysis completes (or on Clear All).
+    @Published var folderClustersStatic: [[String]] = []
+    @Published var representativeImageByFolderStatic: [String: String] = [:]
+    @Published var crossFolderDuplicateCountsStatic: [String: Int] = [:]
+    
+    // MARK: - Performance Cache Storage (ephemeral / derived)
+    private var _flattenedResultsCache: [TableRow]?
+    private var _folderDuplicateCountsCache: [String: Int]?
+    private var _representativeImageByFolderCache: [String: String]?
+    private var _folderClustersCache: [[String]]?
+    private var _crossFolderDuplicateCountsCache: [String: Int]?
+    private var _flattenedResultsSortedCache: [TableRow]?
+    private var _sortedResultsCache: [String: [TableRow]] = [:]
     
     // MARK: - Enhanced Task Management
     private var analysisTask: Task<Void, Never>?
     private var discoveryTask: Task<Void, Never>?
     private var lastProgressUpdate: Date = .distantPast
     
-    // MARK: - Simple Computed Properties (No Caching!)
-    
-    /// Folders that will actually be analyzed (after user exclusions)
+    // MARK: - Computed (lightweight)
     var activeLeafFolders: [URL] {
         discoveredLeafFolders.filter { !excludedLeafFolders.contains($0) }
     }
-    
-    /// Computed property to check if any operation is running
-    var isAnyOperationRunning: Bool {
-        isProcessing || isDiscoveringFolders
+    var foldersToScanLabel: String {
+        activeLeafFolders.map { $0.lastPathComponent }.joined(separator: "\n")
     }
-    
-    /// Sorted list of folders currently being processed (for progress display)
+    var isAnyOperationRunning: Bool { isProcessing || isDiscoveringFolders }
     var allFoldersBeingProcessed: [URL] {
         if isDiscoveringFolders {
             return selectedParentFolders.sorted { $0.path < $1.path }
@@ -63,47 +79,32 @@ final class AppViewModel: ObservableObject {
         }
     }
     
-    // MARK: - SIMPLIFIED: Just flatten the results, no caching!
-    /// Simple flattening - let SwiftUI handle the sorting natively
+    // MARK: - Cached (ephemeral) computed
     var flattenedResults: [TableRow] {
-        comparisonResults.flatMap { result in
+        if let cached = _flattenedResultsCache { return cached }
+        let result = comparisonResults.flatMap { result in
             result.similars
                 .filter { $0.path != result.reference }
                 .map { TableRow(reference: result.reference, similar: $0.path, percent: $0.percent) }
         }
+        _flattenedResultsCache = result
+        return result
     }
-    
-    // MARK: - Minimal Folder Statistics (for cross-folder panel only)
-    /// Simple folder grouping for the cross-folder panel
-    var folderClusters: [[String]] {
-        var folderPairs: Set<[String]> = []
-        
-        for row in flattenedResults where row.isCrossFolder {
-            let referenceFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-            let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-            let sortedPair = [referenceFolder, matchFolder].sorted()
-            folderPairs.insert(sortedPair)
-        }
-        
-        return Array(folderPairs).sorted { $0[0] < $1[0] }
-    }
-    
-    /// Simple cross-folder duplicate counts
-    var crossFolderDuplicateCounts: [String: Int] {
+    var folderDuplicateCounts: [String: Int] {
+        if let cached = _folderDuplicateCountsCache { return cached }
         var counts: [String: Int] = [:]
-        
-        for row in flattenedResults where row.isCrossFolder {
-            let referenceFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-            let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-            counts[referenceFolder, default: 0] += 1
-            counts[matchFolder, default: 0] += 1
+        for result in comparisonResults {
+            let allPaths = [result.reference] + result.similars.map { $0.path }
+            for path in allPaths {
+                let folder = URL(fileURLWithPath: path).deletingLastPathComponent().path
+                counts[folder, default: 0] += 1
+            }
         }
-        
+        _folderDuplicateCountsCache = counts
         return counts
     }
-    
-    /// Simple representative image mapping
     var representativeImageByFolder: [String: String] {
+        if let cached = _representativeImageByFolderCache { return cached }
         var representatives: [String: String] = [:]
         for result in comparisonResults {
             let allPaths = [result.reference] + result.similars.map { $0.path }
@@ -114,19 +115,78 @@ final class AppViewModel: ObservableObject {
                 }
             }
         }
+        _representativeImageByFolderCache = representatives
         return representatives
+    }
+    var folderClusters: [[String]] {
+        if let cached = _folderClustersCache { return cached }
+        var folderPairs: Set<[String]> = []
+        for row in flattenedResults {
+            let referenceFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            guard referenceFolder != matchFolder else { continue }
+            let sortedPair = [referenceFolder, matchFolder].sorted()
+            folderPairs.insert(sortedPair)
+        }
+        let result = Array(folderPairs).sorted { $0[0] < $1[0] }
+        _folderClustersCache = result
+        return result
+    }
+    var crossFolderDuplicateCounts: [String: Int] {
+        if let cached = _crossFolderDuplicateCountsCache { return cached }
+        var counts: [String: Int] = [:]
+        for row in flattenedResults {
+            let ref = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let match = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            guard ref != match else { continue }
+            counts[ref, default: 0] += 1
+            counts[match, default: 0] += 1
+        }
+        _crossFolderDuplicateCountsCache = counts
+        return counts
+    }
+    var flattenedResultsSorted: [TableRow] {
+        if let cached = _flattenedResultsSortedCache { return cached }
+        let result = flattenedResults.sorted { $0.percent > $1.percent }
+        _flattenedResultsSortedCache = result
+        return result
+    }
+    private func sortCacheKey(for sortOrder: [KeyPathComparator<TableRow>]) -> String {
+        if sortOrder.isEmpty { return "default" }
+        return sortOrder.map { c in
+            let keyPath = String(describing: c.keyPath)
+            let order = c.order == .forward ? "asc" : "desc"
+            return "\(keyPath)_\(order)"
+        }.joined(separator: "|")
+    }
+    func getSortedRows(using sortOrder: [KeyPathComparator<TableRow>]) -> [TableRow] {
+        let cacheKey = sortCacheKey(for: sortOrder)
+        if let cached = _sortedResultsCache[cacheKey] { return cached }
+        let sorted: [TableRow]
+        if sortOrder.isEmpty {
+            sorted = flattenedResultsSorted
+        } else {
+            sorted = flattenedResults.sorted(using: sortOrder)
+        }
+        _sortedResultsCache[cacheKey] = sorted
+        return sorted
+    }
+    private func invalidateAllCaches() {
+        _flattenedResultsCache = nil
+        _folderDuplicateCountsCache = nil
+        _representativeImageByFolderCache = nil
+        _folderClustersCache = nil
+        _crossFolderDuplicateCountsCache = nil
+        _flattenedResultsSortedCache = nil
+        _sortedResultsCache.removeAll()
     }
     
     // MARK: - User Actions
-    
-    // Descendant check used by exclusion cleanup
     private func isDescendant(_ child: URL, of ancestor: URL) -> Bool {
         let a = ancestor.standardizedFileURL.pathComponents
         let c = child.standardizedFileURL.pathComponents
         return c.starts(with: a)
     }
-
-    // Clear exclusions that live under the specified parents
     private func removeExclusions(under parents: [URL]) {
         guard !parents.isEmpty else { return }
         let parentsStd = parents.map { $0.standardizedFileURL }
@@ -134,52 +194,35 @@ final class AppViewModel: ObservableObject {
             !parentsStd.contains { parent in isDescendant(leaf, of: parent) }
         }
     }
-
-    /// Adds parent folders; re-adding an existing parent triggers a targeted rescan
     @MainActor
     func addParentFolders(_ urls: [URL]) {
         let dirs = FileSystemHelpers.filterDirectories(from: urls)
         guard !dirs.isEmpty else { return }
-
         let existing = Set(selectedParentFolders.map { $0.standardizedFileURL })
         var toRescan: [URL] = []
         var toAppend: [URL] = []
-
         for u in dirs {
             let s = u.standardizedFileURL
-            if existing.contains(s) {
-                toRescan.append(s)
-            } else {
-                toAppend.append(s)
-            }
+            if existing.contains(s) { toRescan.append(s) } else { toAppend.append(s) }
         }
-
         if !toAppend.isEmpty {
             selectedParentFolders.append(contentsOf: toAppend)
             removeExclusions(under: toAppend)
             discoverFoldersAsync()
         }
-
-        if !toRescan.isEmpty {
-            rescanSelectedParents(toRescan)
-        }
+        if !toRescan.isEmpty { rescanSelectedParents(toRescan) }
     }
-
-    // MARK: - Targeted rescan (no UI)
     @MainActor
     private func rescanSelectedParents(_ parents: [URL]) {
         guard !parents.isEmpty else { return }
         guard !isAnyOperationRunning else { return }
-
         isDiscoveringFolders = true
         let parentsStd = parents.map { $0.standardizedFileURL }
-
         discoveryTask?.cancel()
         discoveryTask = Task {
             let ignored = self.ignoredFolderName
                 .lowercased()
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-
             let freshlyDiscovered: [URL] = await Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self else { return [] }
                 var out: [URL] = []
@@ -190,7 +233,6 @@ final class AppViewModel: ObservableObject {
                 }
                 return out
             }.value
-
             guard !Task.isCancelled else {
                 await MainActor.run {
                     self.isDiscoveringFolders = false
@@ -198,14 +240,10 @@ final class AppViewModel: ObservableObject {
                 }
                 return
             }
-
             await MainActor.run {
-                // Remove previously discovered leafs that live under these parents
                 self.discoveredLeafFolders.removeAll { leaf in
                     parentsStd.contains { self.isDescendant(leaf, of: $0) }
                 }
-
-                // Merge freshly discovered leafs (dedupe)
                 var seen = Set(self.discoveredLeafFolders.map { $0.standardizedFileURL })
                 for leaf in freshlyDiscovered {
                     let s = leaf.standardizedFileURL
@@ -214,41 +252,30 @@ final class AppViewModel: ObservableObject {
                         seen.insert(s)
                     }
                 }
-
-                // Clear exclusions that live under these parents
                 self.excludedLeafFolders = self.excludedLeafFolders.filter { ex in
                     !parentsStd.contains { self.isDescendant(ex, of: $0) }
                 }
-
-                // Global pruning: keep exclusions only if that leaf still exists
                 self.reconcileExclusionsWithDiscovered()
-
                 self.isDiscoveringFolders = false
                 self.discoveryTask = nil
             }
         }
     }
-
-    /// Enhanced folder discovery
+    
     private func discoverFoldersAsync() {
         guard !selectedParentFolders.isEmpty else { return }
         guard !isAnyOperationRunning else { return }
-        
         discoveryTask?.cancel()
         isDiscoveringFolders = true
-        
         let foldersToScan = selectedParentFolders
-        
         discoveryTask = Task {
             let discovered = await Task.detached(priority: .userInitiated) {
                 await self.discoverFoldersWithLimits(from: foldersToScan)
             }.value
-            
             await MainActor.run {
                 if !Task.isCancelled {
                     self.discoveredLeafFolders = discovered
                     self.reconcileExclusionsWithDiscovered()
-
                     if discovered.count >= Self.maxDiscoveryBatchSize {
                         print("Warning: Discovery limited to \(Self.maxDiscoveryBatchSize) folders to prevent memory issues")
                     }
@@ -258,62 +285,40 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
-    
-    /// Enhanced folder discovery with memory pressure monitoring and batch limiting
     private func discoverFoldersWithLimits(from roots: [URL]) async -> [URL] {
         var discovered: [URL] = []
         discovered.reserveCapacity(Self.maxDiscoveryBatchSize)
-        
         let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
         for root in roots {
             if Task.isCancelled { break }
-            
             if await isMemoryPressureHigh() {
                 print("Warning: High memory pressure detected during folder discovery")
                 break
             }
-            
             let leafFolders = await findLeafFoldersWithIgnoreFilter(root: root, ignoredName: ignoredName)
-            
             for folder in leafFolders {
-                if discovered.count >= Self.maxDiscoveryBatchSize {
-                    break
-                }
+                if discovered.count >= Self.maxDiscoveryBatchSize { break }
                 discovered.append(folder)
             }
-            
-            if discovered.count >= Self.maxDiscoveryBatchSize {
-                break
-            }
-            
+            if discovered.count >= Self.maxDiscoveryBatchSize { break }
             await Task.yield()
         }
-        
         return discovered
     }
-    
-    /// Find leaf folders while filtering ignored folders
     private func findLeafFoldersWithIgnoreFilter(root: URL, ignoredName: String) async -> [URL] {
         return await Task.detached {
             let fm = FileManager.default
             var leafFolders: [URL] = []
-            
             func findLeafFolders(in directory: URL) {
                 let folderName = directory.lastPathComponent.lowercased()
-                if !ignoredName.isEmpty && folderName == ignoredName {
-                    return
-                }
-                
+                if !ignoredName.isEmpty && folderName == ignoredName { return }
                 guard let contents = try? fm.contentsOfDirectory(
                     at: directory,
                     includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
                     options: [.skipsHiddenFiles]
                 ) else { return }
-                
                 var subdirectories: [URL] = []
                 var hasImageFiles = false
-                
                 for item in contents {
                     if let resourceValues = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]) {
                         if resourceValues.isDirectory == true {
@@ -324,63 +329,54 @@ final class AppViewModel: ObservableObject {
                         } else if resourceValues.isRegularFile == true {
                             let ext = item.pathExtension.lowercased()
                             let imageExtensions: Set<String> = ["jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"]
-                            if imageExtensions.contains(ext) {
-                                hasImageFiles = true
-                            }
+                            if imageExtensions.contains(ext) { hasImageFiles = true }
                         }
                     }
                 }
-                
-                if hasImageFiles {
-                    leafFolders.append(directory)
-                }
-
+                if hasImageFiles { leafFolders.append(directory) }
                 if !subdirectories.isEmpty {
-                    for subdir in subdirectories {
-                        findLeafFolders(in: subdir)
-                    }
+                    for subdir in subdirectories { findLeafFolders(in: subdir) }
                 }
             }
-            
             findLeafFolders(in: root)
             return leafFolders
         }.value
     }
-    
-    /// Excludes a leaf folder from analysis
     func removeLeafFolder(_ leafURL: URL) {
         excludedLeafFolders.insert(leafURL.standardizedFileURL)
     }
     
     // MARK: - Enhanced Analysis Operations
-
-    /// Starts image analysis
     func processImages(progress: @escaping @Sendable (Double) -> Void) {
         guard !isAnyOperationRunning else { return }
+        
+        // New run: clear the static snapshot up front (so UI reflects "previous run frozen")
+        folderClustersStatic.removeAll()
+        representativeImageByFolderStatic.removeAll()
+        crossFolderDuplicateCountsStatic.removeAll()
         
         cancelAllOperations()
         isProcessing = true
         processingProgress = 0.0
-
+        
         let leafFolders = activeLeafFolders
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
         let ignoredFolder = ignoredFolderName
-
+        
         let progressWrapper: @Sendable (Double) -> Void = { [weak self] p in
             Task { @MainActor in
                 let now = Date()
                 if let self = self, now.timeIntervalSince(self.lastProgressUpdate) >= Self.progressUpdateThrottle {
                     self.lastProgressUpdate = now
                     self.processingProgress = p
-                    progress(p)
                 }
             }
+            DispatchQueue.main.async { progress(p) }
         }
-
+        
         analysisTask = Task {
             let results: [ImageComparisonResult]
-            
             switch selectedAnalysisMode {
             case .deepFeature:
                 results = await withTaskCancellationHandler {
@@ -396,7 +392,6 @@ final class AppViewModel: ObservableObject {
                         )
                     }
                 } onCancel: {}
-                
             case .perceptualHash:
                 results = await withTaskCancellationHandler {
                     await withCheckedContinuation { continuation in
@@ -416,6 +411,8 @@ final class AppViewModel: ObservableObject {
             await MainActor.run {
                 if !Task.isCancelled {
                     self.comparisonResults = results
+                    // 🔒 Build the STATIC snapshot once per run
+                    self.buildFolderDuplicatesSnapshot()
                 }
                 self.processingProgress = nil
                 self.isProcessing = false
@@ -423,57 +420,86 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
-
-    /// Cancels the current analysis operation
+    
+    /// Builds the frozen snapshot from the current `comparisonResults`.
+    private func buildFolderDuplicatesSnapshot() {
+        // Reuse the existing (ephemeral) calculators but write the results into the static stores.
+        // These three will no longer track any later mutations (sorts, selections, etc.).
+        let rows = flattenedResults
+        
+        // 1) Representative image per folder
+        var reps: [String: String] = [:]
+        for row in rows {
+            let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            if reps[refFolder] == nil { reps[refFolder] = row.reference }
+            if reps[matchFolder] == nil { reps[matchFolder] = row.similar }
+        }
+        
+        // 2) Cross‑folder counts (bidirectional)
+        var counts: [String: Int] = [:]
+        for row in rows {
+            let ref = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let match = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            guard ref != match else { continue }
+            counts[ref, default: 0] += 1
+            counts[match, default: 0] += 1
+        }
+        
+        // 3) Folder relationship clusters
+        var folderPairs: Set<[String]> = []
+        for row in rows {
+            let a = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let b = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            guard a != b else { continue }
+            folderPairs.insert([a, b].sorted())
+        }
+        let clusters = Array(folderPairs).sorted { $0[0] < $1[0] }
+        
+        // Commit the snapshot
+        self.representativeImageByFolderStatic = reps
+        self.crossFolderDuplicateCountsStatic = counts
+        self.folderClustersStatic = clusters
+    }
+    
+    /// Cancels the current analysis operation and resets processing state
     func cancelAnalysis() {
         cancelAllOperations()
         isProcessing = false
         isDiscoveringFolders = false
         processingProgress = nil
     }
-    
-    /// Cancel all background operations
     private func cancelAllOperations() {
-        analysisTask?.cancel()
-        analysisTask = nil
-        discoveryTask?.cancel()
-        discoveryTask = nil
+        analysisTask?.cancel(); analysisTask = nil
+        discoveryTask?.cancel(); discoveryTask = nil
     }
-
+    
     // MARK: - File System Operations
-    /// Opens a folder in Finder
     func openFolderInFinder(_ folder: String) {
         let url = URL(fileURLWithPath: folder, isDirectory: true)
         NSWorkspace.shared.open(url)
     }
-
-    /// Deletes currently selected matches
+    
+    // Deletions DO NOT rebuild snapshot (keeps the view static after analysis).
     func deleteSelectedMatches() {
         guard !selectedMatchesForDeletion.isEmpty else { return }
-        
         let matchesToDelete = Array(selectedMatchesForDeletion)
         selectedMatchesForDeletion.removeAll()
-        
         let filePaths = matchesToDelete.compactMap { rowID -> String? in
             let components = rowID.components(separatedBy: "::")
             return components.count == 2 ? components[1] : nil
         }
-        
         filePaths.forEach(deleteFile)
     }
-
-    /// Deletes a single file and updates the results data structure
     func deleteFile(_ path: String) {
         do {
             try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
         } catch {
             print("Failed to move file to trash: \(error.localizedDescription)")
         }
-        
         for (index, result) in comparisonResults.enumerated().reversed() {
             let filteredSimilars = result.similars.filter { $0.path != path }
             let hasNonReferenceSimilars = filteredSimilars.contains { $0.path != result.reference }
-            
             if result.reference == path || !hasNonReferenceSimilars {
                 comparisonResults.remove(at: index)
             } else if filteredSimilars.count != result.similars.count {
@@ -485,25 +511,16 @@ final class AppViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Selection Management
+    // MARK: - Selection for Menu Commands
     @Published var selectedMatchesForDeletion: Set<String> = []
-    
-    var hasSelectedMatches: Bool {
-        !selectedMatchesForDeletion.isEmpty
-    }
-    
+    var hasSelectedMatches: Bool { !selectedMatchesForDeletion.isEmpty }
     func toggleSelection(for rowIDs: Set<String>) {
         if rowIDs.count > 1 {
             let allChecked = rowIDs.allSatisfy { selectedMatchesForDeletion.contains($0) }
-            
             if allChecked {
-                for rowID in rowIDs {
-                    selectedMatchesForDeletion.remove(rowID)
-                }
+                for rowID in rowIDs { selectedMatchesForDeletion.remove(rowID) }
             } else {
-                for rowID in rowIDs {
-                    selectedMatchesForDeletion.insert(rowID)
-                }
+                for rowID in rowIDs { selectedMatchesForDeletion.insert(rowID) }
             }
         } else if let focusedID = rowIDs.first {
             if selectedMatchesForDeletion.contains(focusedID) {
@@ -513,10 +530,7 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
-    
-    func clearSelection() {
-        selectedMatchesForDeletion.removeAll()
-    }
+    func clearSelection() { selectedMatchesForDeletion.removeAll() }
     
     // MARK: - State Management
     func clearAll() {
@@ -524,12 +538,15 @@ final class AppViewModel: ObservableObject {
         isProcessing = false
         isDiscoveringFolders = false
         processingProgress = nil
-        
         selectedParentFolders.removeAll()
         excludedLeafFolders.removeAll()
         discoveredLeafFolders.removeAll()
         selectedMatchesForDeletion.removeAll()
         comparisonResults.removeAll()
+        // Also clear the static snapshot so panel shows empty until next run.
+        folderClustersStatic.removeAll()
+        representativeImageByFolderStatic.removeAll()
+        crossFolderDuplicateCountsStatic.removeAll()
     }
     
     // MARK: - Memory Pressure Monitoring
@@ -543,7 +560,6 @@ final class AppViewModel: ObservableObject {
                         task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
                     }
                 }
-                
                 if kerr == KERN_SUCCESS {
                     let memoryThreshold: UInt64 = 512 * 1024 * 1024
                     let isHighMemory = info.resident_size > memoryThreshold
@@ -558,44 +574,34 @@ final class AppViewModel: ObservableObject {
     // MARK: - CSV Export
     func triggerCSVExport() {
         guard !comparisonResults.isEmpty, !isProcessing else { return }
-
         let header = "Reference,Match,Similarity,Cross-Folder,Reference Folder,Match Folder"
         var lines: [String] = [header]
-
-        // Use simple flattened results, sorted by percent descending
-        let rows = flattenedResults.sorted { $0.percent > $1.percent }
+        let rows = flattenedResultsSorted
         lines.reserveCapacity(rows.count + 1)
-
         for row in rows {
             let referenceFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-            let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-
+            let matchFolder     = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            let isCrossFolder   = referenceFolder != matchFolder
             let line = [
                 Self.escapeCSVField(row.reference),
                 Self.escapeCSVField(row.similar),
                 String(format: "%.1f%%", row.percent * 100),
-                row.crossFolderText,
+                isCrossFolder ? "Yes" : "No",
                 Self.escapeCSVField(referenceFolder),
                 Self.escapeCSVField(matchFolder)
             ].joined(separator: ",")
-
             lines.append(line)
         }
-
         let csvText = lines.joined(separator: "\n") + "\n"
         csvDocument = CSVDocument(data: Data(csvText.utf8))
-
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         exportFilename = "Twinalyzer_Results_\(df.string(from: Date()))"
-
         isExportingCSV = true
     }
-
     func handleCSVExportResult(_ result: Result<URL, Error>) {
         switch result {
-        case .success(let url):
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case .success(let url): NSWorkspace.shared.activateFileViewerSelecting([url])
         case .failure(let error):
             let alert = NSAlert()
             alert.messageText = "Export Failed"
@@ -605,7 +611,6 @@ final class AppViewModel: ObservableObject {
             alert.runModal()
         }
     }
-
     private static func escapeCSVField(_ field: String) -> String {
         if field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains("\r") {
             let escaped = field.replacingOccurrences(of: "\"", with: "\"\"")
@@ -613,7 +618,7 @@ final class AppViewModel: ObservableObject {
         }
         return field
     }
-
+    
     // MARK: - Exclusion reconciliation
     @MainActor
     private func reconcileExclusionsWithDiscovered() {
@@ -625,3 +630,4 @@ final class AppViewModel: ObservableObject {
         )
     }
 }
+

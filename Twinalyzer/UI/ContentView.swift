@@ -285,33 +285,33 @@ struct ContentView: View {
     }
     
     // MARK: - Preview Panel (simplified)
-    var previewPanel: some View {
-        GeometryReader { geometry in
-            VStack {
-                if let row = selectedRow, !sortedResults.isEmpty {
-                    previewLayout(for: row, in: geometry.size)
-                } else {
-                    VStack(spacing: 8) {
-                        if vm.selectedMatchesForDeletion.count > 1 {
-                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
-                                .foregroundStyle(.secondary)
-                            Text("Press Delete or use toolbar button to delete selected matches")
-                                .foregroundStyle(.secondary)
-                                .font(.footnote)
-                        } else {
-                            Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-        }
-    }
+//    var previewPanel: some View {
+//        GeometryReader { geometry in
+//            VStack {
+//                if let row = selectedRow, !sortedResults.isEmpty {
+//                    previewLayout(for: row, in: geometry.size)
+//                } else {
+//                    VStack(spacing: 8) {
+//                        if vm.selectedMatchesForDeletion.count > 1 {
+//                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
+//                                .foregroundStyle(.secondary)
+//                            Text("Press Delete or use toolbar button to delete selected matches")
+//                                .foregroundStyle(.secondary)
+//                                .font(.footnote)
+//                        } else {
+//                            Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
+//                                .foregroundStyle(.secondary)
+//                        }
+//                    }
+//                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+//                }
+//            }
+//        }
+//    }
     
     // MARK: - Preview Layout (simplified - no more complex display helpers)
     @ViewBuilder
-    private func previewLayout(for row: TableRow, in size: CGSize) -> some View {
+    func renderPreview(for row: TableRow, size: CGSize) -> some View {
         let spacing: CGFloat = 20
         let inset: CGFloat = 16
         let twoColumnWidth = max(0, size.width - spacing - inset * 2)
