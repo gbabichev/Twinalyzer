@@ -1,9 +1,7 @@
 /*
  
- ContentView.swift
+ ContentView.swift - Updated for Simplified Table
  Twinalyzer
- 
- George Babichev
  
  */
 
@@ -28,37 +26,22 @@ struct ContentView: View {
     @State var selectionDebounceTimer: Timer?
     @FocusState var isTableFocused: Bool
 
-    // MARK: - Selection State Management
-    // The app maintains two separate selection systems:
-    // 1. tableSelection: Tracks which rows are focused/highlighted in the table (for navigation and preview)
-    // 2. selectedMatchesForDeletion: Now managed by the view model to enable menu bar commands
-    @State var tableSelection: Set<String> = [] // For table focus/navigation and preview
-    // selectedMatchesForDeletion is now managed by vm.selectedMatchesForDeletion
+    // MARK: - SIMPLIFIED Selection State Management
+    // Just one selection system now - table selection for navigation/preview
+    @State var tableSelection: Set<String> = []
     
-    // MARK: - Table Sorting
-    @State var hasAutoSorted = false
-    @State var sortOrder: [KeyPathComparator<TableRow>] = [] // User-configurable sort order for table columns
+    // MARK: - SIMPLIFIED Table Sorting - Let SwiftUI handle it!
+    @State var sortOrder: [KeyPathComparator<TableRow>] = []
     
-    /// Returns the table rows sorted according to user preferences
-    /// If no sort order is specified, returns rows in their natural order from the view model
-    var sortedRows: [TableRow] {
-        return vm.getSortedRows(using: sortOrder)
-    }
-    
-    /// Returns the currently focused/selected row for preview display
-    /// Uses the first item from tableSelection (table focus) to determine which row to show in the detail view
-    /// Returns nil if no row is selected or if the selection doesn't match any existing row
+    /// SIMPLIFIED: Get the currently selected row for preview
     var selectedRow: TableRow? {
         guard let firstID = debouncedSelection.first else { return nil }
-        return sortedRows.first(where: { $0.id == firstID })
+        return sortedResults.first(where: { $0.id == firstID })
     }
     
-    // Add debounced selection change handler
+    // Debounced selection change handler
     private func handleSelectionChange() {
-        // Cancel existing timer
         selectionDebounceTimer?.invalidate()
-        
-        // Reduce debounce delay to 50ms for better responsiveness
         selectionDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { _ in
             DispatchQueue.main.async {
                 self.debouncedSelection = self.tableSelection
@@ -77,7 +60,7 @@ struct ContentView: View {
                         .navigationSplitViewColumnWidth(min: 100, ideal:200, max:300)
                 } content: {
                     tableView
-                        .navigationSplitViewColumnWidth(min: 400, ideal: 500)
+                        .navigationSplitViewColumnWidth(min: 500, ideal: 600) // Wider for new column
                 } detail: {
                     detailSplitView
                         .navigationSplitViewColumnWidth(min: 200, ideal: 400)
@@ -85,7 +68,7 @@ struct ContentView: View {
                 .navigationSplitViewStyle(.prominentDetail)
             }
         }
-        .frame(minWidth: 1000, minHeight: 600)
+        .frame(minWidth: 1200, minHeight: 600) // Slightly wider for new column
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
@@ -94,14 +77,14 @@ struct ContentView: View {
                 } label: {
                     Label("Open Folder", systemImage: "folder")
                 }
-                .disabled(vm.isAnyOperationRunning) // Disable during processing
+                .disabled(vm.isAnyOperationRunning)
                 
                 Button {
                     clearAll()
                 } label: {
                     Label("Clear Folders", systemImage: "arrow.counterclockwise")
                 }
-                .disabled(vm.selectedParentFolders.isEmpty || vm.isAnyOperationRunning) // Disable during processing
+                .disabled(vm.selectedParentFolders.isEmpty || vm.isAnyOperationRunning)
                 .help("Clear all selected folders")
                 
                 Button {
@@ -112,7 +95,7 @@ struct ContentView: View {
                 .popover(isPresented: $showSettingsPopover) {
                     controlsPanelPopover
                 }
-                .disabled(vm.isAnyOperationRunning) // Disable during processing
+                .disabled(vm.isAnyOperationRunning)
             }
             
             // CENTER: Title describing the app
@@ -120,9 +103,9 @@ struct ContentView: View {
                 Spacer()
             }
 
-            // RIGHT: Primary actions.
+            // RIGHT: Primary actions
             ToolbarItemGroup(placement: .primaryAction) {
-                // Clear selection button - only shows when items are selected for deletion
+                // Clear selection button
                 if !vm.selectedMatchesForDeletion.isEmpty {
                     Button {
                         vm.clearSelection()
@@ -134,10 +117,10 @@ struct ContentView: View {
                         }
                     }
                     .help("Clear selection (\(vm.selectedMatchesForDeletion.count) item\(vm.selectedMatchesForDeletion.count == 1 ? "" : "s"))")
-                    .disabled(vm.isAnyOperationRunning) // Disable during processing
+                    .disabled(vm.isAnyOperationRunning)
                 }
                 
-                // Delete selected button - shows count and allows batch deletion
+                // Delete selected button
                 if !vm.selectedMatchesForDeletion.isEmpty {
                     Button {
                         vm.deleteSelectedMatches()
@@ -150,7 +133,7 @@ struct ContentView: View {
                         }
                     }
                     .help("Delete \(vm.selectedMatchesForDeletion.count) selected match\(vm.selectedMatchesForDeletion.count == 1 ? "" : "es")")
-                    .disabled(vm.isAnyOperationRunning) // Disable during processing
+                    .disabled(vm.isAnyOperationRunning)
                 }
                 
                 // Processing state: Show cancel button during analysis
@@ -163,8 +146,7 @@ struct ContentView: View {
                 } else {
                     // Ready state: Show analyze button when ready to process
                     Button {
-                        // Clear both selection states when starting new analysis
-                        // This prevents stale selections from previous results
+                        // Clear selection states when starting new analysis
                         tableSelection.removeAll()
                         vm.clearSelection()
                         vm.processImages(progress: { _ in })
@@ -176,18 +158,16 @@ struct ContentView: View {
             }
         }
         // MARK: - Keyboard Shortcuts
-        // Space bar toggles deletion checkbox for selected rows
         .onKeyPress(.space) {
             guard !tableSelection.isEmpty else { return .handled }
             
-            // Defer the selection change to avoid "Publishing changes from within view updates"
             DispatchQueue.main.async {
                 vm.toggleSelection(for: tableSelection)
             }
             
             return .handled
-        }       // MARK: - Drag and Drop Support
-        // Allow users to drag folders directly onto the app window
+        }
+        // MARK: - Drag and Drop Support
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             Task {
                 var droppedURLs: [URL] = []
@@ -200,7 +180,7 @@ struct ContentView: View {
                             droppedURLs.append(url)
                         }
                     } catch {
-                        // Silently ignore failed items - don't interrupt the drag operation
+                        // Silently ignore failed items
                     }
                 }
                 
@@ -226,4 +206,169 @@ struct ContentView: View {
         }
     }
     
+    // MARK: - SIMPLIFIED Results Table with Native Sorting
+    /// Apply the sortOrder to get native column header sorting
+    var sortedResults: [TableRow] {
+        if sortOrder.isEmpty {
+            return vm.flattenedResults
+        } else {
+            return vm.flattenedResults.sorted(using: sortOrder)
+        }
+    }
+    
+    var tableView: some View {
+        Table(sortedResults, selection: $tableSelection, sortOrder: $sortOrder) {
+            // Reference column with deletion checkbox
+            TableColumn("Reference", value: \.reference) { row in
+                HStack(spacing: 8) {
+                    // Deletion checkbox
+                    Button(action: {
+                        if vm.selectedMatchesForDeletion.contains(row.id) {
+                            vm.selectedMatchesForDeletion.remove(row.id)
+                        } else {
+                            vm.selectedMatchesForDeletion.insert(row.id)
+                        }
+                    }) {
+                        Image(systemName: vm.selectedMatchesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
+                            .foregroundColor(vm.selectedMatchesForDeletion.contains(row.id) ? .blue : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 20)
+                    
+                    // Reference path with cross-folder highlighting
+                    Text(row.referenceShort)
+                        .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .width(min: 200, ideal: 250)
+            
+            // Match column
+            TableColumn("Match", value: \.similar) { row in
+                Text(row.similarShort)
+                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .width(min: 200, ideal: 250)
+            
+            // NEW: Cross-folder column
+            TableColumn("Cross-Folder", value: \.crossFolderText) { row in
+                Text(row.crossFolderText)
+                    .foregroundStyle(row.isCrossFolder ? .red : .secondary)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .width(90)
+            
+            // Similarity percentage column
+            TableColumn("Similarity", value: \.percent) { row in
+                Text(row.percentDisplay)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .width(80)
+        }
+        .tableStyle(.automatic)
+        .navigationTitle("Results")
+        .focused($isTableFocused)
+        .onAppear {
+            // Ensure focus when table appears with data
+            if !sortedResults.isEmpty && tableSelection.isEmpty {
+                if let firstRow = sortedResults.first {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        tableSelection = [firstRow.id]
+                        isTableFocused = true
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Preview Panel (simplified)
+    var previewPanel: some View {
+        GeometryReader { geometry in
+            VStack {
+                if let row = selectedRow, !sortedResults.isEmpty {
+                    previewLayout(for: row, in: geometry.size)
+                } else {
+                    VStack(spacing: 8) {
+                        if vm.selectedMatchesForDeletion.count > 1 {
+                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
+                                .foregroundStyle(.secondary)
+                            Text("Press Delete or use toolbar button to delete selected matches")
+                                .foregroundStyle(.secondary)
+                                .font(.footnote)
+                        } else {
+                            Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Preview Layout (simplified - no more complex display helpers)
+    @ViewBuilder
+    private func previewLayout(for row: TableRow, in size: CGSize) -> some View {
+        let spacing: CGFloat = 20
+        let inset: CGFloat = 16
+        let twoColumnWidth = max(0, size.width - spacing - inset * 2)
+        let singleColumn = twoColumnWidth / 2
+        let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
+        
+        HStack(alignment: .top, spacing: spacing) {
+            // Left side: Reference image
+            VStack(spacing: 8) {
+                Text("Reference")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text(row.referenceShort)
+                    .font(.caption)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+                
+                PreviewImage(path: row.reference, maxDimension: maxDim, priority: .userInitiated)
+                    .frame(maxWidth: maxDim, maxHeight: maxDim)
+                    .clipped()
+                
+                Button("Delete Reference") {
+                    vm.deleteFile(row.reference)
+                }
+                .controlSize(.small)
+                .disabled(vm.isProcessing)
+            }
+            .frame(maxWidth: max(100, singleColumn))
+            
+            // Right side: Match image
+            VStack(spacing: 8) {
+                Text("Match")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text(row.similarShort)
+                    .font(.caption)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                
+                PreviewImage(path: row.similar, maxDimension: maxDim, priority: .utility)
+                    .frame(maxWidth: maxDim, maxHeight: maxDim)
+                    .clipped()
+                
+                Button("Delete Match") {
+                    vm.deleteFile(row.similar)
+                }
+                .controlSize(.small)
+                .disabled(vm.isProcessing)
+            }
+            .frame(maxWidth: max(100, singleColumn))
+        }
+        .padding(inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
 }

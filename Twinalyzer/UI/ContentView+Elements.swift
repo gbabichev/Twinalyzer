@@ -409,31 +409,6 @@ extension ContentView {
     // MARK: - Preview Panel
     /// Bottom section of detail view showing side-by-side image comparison
     /// Displays reference and match images with delete buttons
-    var previewPanel: some View {
-        GeometryReader { geometry in
-            VStack {
-                // Show preview if a row is selected and results exist
-                if let row = selectedRow, !vm.flattenedResults.isEmpty {
-                    previewLayout(for: row, in: geometry.size)
-                } else {
-                    // Empty state messaging based on current selection state
-                    VStack(spacing: 8) {
-                        if vm.selectedMatchesForDeletion.count > 1 {
-                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
-                                .foregroundStyle(.secondary)
-                            Text("Press Delete or use toolbar button to delete selected matches")
-                                .foregroundStyle(.secondary)
-                                .font(.footnote)
-                        } else {
-                            Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-        }
-    }
     
     /// Side-by-side layout for comparing reference and match images
     /// Calculates optimal image sizes based on available space
@@ -600,59 +575,11 @@ extension ContentView {
     // MARK: - Results Table
     /// Center panel displaying comparison results in sortable table format
     /// Includes checkboxes for deletion selection and similarity percentages
-    var tableView: some View {
-        Table(sortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
-            // Reference column with deletion checkbox
-            TableColumn("Reference", value: \.reference) { row in
-                let isMarked = vm.selectedMatchesForDeletion.contains(row.id)
-                RefCell(
-                    id: row.id,
-                    isMarked: isMarked,
-                    referenceShort: row.referenceShort,
-                    isCrossFolder: row.isCrossFolder,
-                    toggle: {
-                        if isMarked { vm.selectedMatchesForDeletion.remove(row.id) }
-                        else        { vm.selectedMatchesForDeletion.insert(row.id) }
-                    }
-                )
-                .equatable() // <-- important
-            }
-            .width(min: 200, ideal: 250)
+    // ContentView.swift - Table Section Only
+    // Replace your existing tableView with this simplified version
 
-
-            
-            // Match column showing similar image path
-            TableColumn("Match", value: \.similar) { row in
-                Text(row.similarShort)
-                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .width(min: 200, ideal: 250)
-            
-            // Similarity percentage column with monospaced font for alignment
-            TableColumn("Similarity", value: \.percent) { row in
-                Text(row.percentDisplay).font(.system(.body, design: .monospaced))
-            }.width(80)
-        }
-        .tableStyle(.automatic)
-        .transaction { $0.animation = nil }
-        .environment(\.defaultMinListRowHeight, 18)
-        .navigationTitle("Results")
-        .focused($isTableFocused)
-        .onAppear {
-            // Ensure focus when table appears with data
-            if !sortedRows.isEmpty && tableSelection.isEmpty {
-                if let firstRow = sortedRows.first {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        tableSelection = [firstRow.id]
-                        isTableFocused = true
-                    }
-                }
-            }
-        }
-    }
-    
+    // MARK: - Results Table with Native Sorting
+    /// Simplified table that uses SwiftUI's native sorting - no custom caching!
     // MARK: - Detail Split View
     /// Right panel with vertical split: cross-folder duplicates on top, preview on bottom
     var detailSplitView: some View {
