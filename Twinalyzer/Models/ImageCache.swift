@@ -14,6 +14,7 @@
 import AppKit
 import ImageIO
 import CoreGraphics
+import Darwin.Mach
 
 // MARK: - Non-isolated config (safe from any actor/thread)
 private enum _ImageCacheConfig {

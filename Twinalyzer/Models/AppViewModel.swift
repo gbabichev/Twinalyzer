@@ -570,15 +570,15 @@ final class AppViewModel: ObservableObject {
         // Enhanced progress wrapper with throttling
         let progressWrapper: @Sendable (Double) -> Void = { [weak self] p in
             Task { @MainActor in
-                // Throttle progress updates to prevent UI spam
                 let now = Date()
                 if let self = self, now.timeIntervalSince(self.lastProgressUpdate) >= Self.progressUpdateThrottle {
                     self.lastProgressUpdate = now
                     self.processingProgress = p
+                    progress(p) // already on main
                 }
             }
-            DispatchQueue.main.async { progress(p) }
         }
+
 
         // Launch analysis task based on selected method
         analysisTask = Task {
