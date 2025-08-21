@@ -421,8 +421,8 @@ extension ContentView {
     /// Right panel with vertical split: cross-folder duplicates on top, preview on bottom
     var detailSplitView: some View {
         VSplitView {
-            duplicatesFolderPanel
-                .frame(minHeight: 150, idealHeight: 200)
+//            duplicatesFolderPanel
+//                .frame(minHeight: 150, idealHeight: 200)
             
             previewPanel
                 .frame(minHeight: 200)

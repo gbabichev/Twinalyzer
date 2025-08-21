@@ -17,6 +17,26 @@ import UniformTypeIdentifiers
 @MainActor
 final class AppViewModel: ObservableObject {
     
+    // Stable identifiers for known TableRow columns (for sort cache keys)
+    private static let _kpRef: KeyPath<TableRow, String>   = \.reference
+    private static let _kpSim: KeyPath<TableRow, String>   = \.similar
+    private static let _kpPct: KeyPath<TableRow, Double>   = \.percent
+
+    private static let _idRef = ObjectIdentifier(_kpRef)
+    private static let _idSim = ObjectIdentifier(_kpSim)
+    private static let _idPct = ObjectIdentifier(_kpPct)
+    
+    @Published private(set) var activeSortedRows: [TableRow] = []
+    @Published private(set) var rowIndexByID: [String: Int] = [:]
+    
+    func applySort(_ sortOrder: [KeyPathComparator<TableRow>]) {
+        let rows = getSortedRows(using: sortOrder)   // hits your cache once
+        activeSortedRows = rows                      // freeze for UI
+        // O(1) lookup for selected row -> avoids first(where:) scans
+        rowIndexByID = Dictionary(uniqueKeysWithValues: rows.enumerated().map { ($1.id, $0) })
+    }
+    
+    
     //MARK: - CSV
     @Published var isExportingCSV = false
     @Published var csvDocument: CSVDocument? = nil
@@ -152,13 +172,21 @@ final class AppViewModel: ObservableObject {
         return result
     }
     private func sortCacheKey(for sortOrder: [KeyPathComparator<TableRow>]) -> String {
-        if sortOrder.isEmpty { return "default" }
+        guard !sortOrder.isEmpty else { return "default" }
         return sortOrder.map { c in
-            let keyPath = String(describing: c.keyPath)
-            let order = c.order == .forward ? "asc" : "desc"
-            return "\(keyPath)_\(order)"
+            let kid = ObjectIdentifier(c.keyPath)
+            let col: String
+            switch kid {
+            case Self._idRef: col = "ref"
+            case Self._idSim: col = "sim"
+            case Self._idPct: col = "pct"
+            default:          col = "custom" // fallback for future columns
+            }
+            let ord = (c.order == .forward) ? "asc" : "desc"
+            return "\(col)_\(ord)"
         }.joined(separator: "|")
     }
+
     func getSortedRows(using sortOrder: [KeyPathComparator<TableRow>]) -> [TableRow] {
         let cacheKey = sortCacheKey(for: sortOrder)
         if let cached = _sortedResultsCache[cacheKey] { return cached }
@@ -411,6 +439,7 @@ final class AppViewModel: ObservableObject {
             await MainActor.run {
                 if !Task.isCancelled {
                     self.comparisonResults = results
+                    self.applySort([])
                     // 🔒 Build the STATIC snapshot once per run
                     self.buildFolderDuplicatesSnapshot()
                 }
@@ -543,6 +572,8 @@ final class AppViewModel: ObservableObject {
         discoveredLeafFolders.removeAll()
         selectedMatchesForDeletion.removeAll()
         comparisonResults.removeAll()
+        activeSortedRows.removeAll()
+        rowIndexByID.removeAll()
         // Also clear the static snapshot so panel shows empty until next run.
         folderClustersStatic.removeAll()
         representativeImageByFolderStatic.removeAll()

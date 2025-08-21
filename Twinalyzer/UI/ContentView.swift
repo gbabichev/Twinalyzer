@@ -35,9 +35,14 @@ struct ContentView: View {
     
     /// SIMPLIFIED: Get the currently selected row for preview
     var selectedRow: TableRow? {
-        guard let firstID = debouncedSelection.first else { return nil }
-        return sortedResults.first(where: { $0.id == firstID })
+        guard
+            let firstID = debouncedSelection.first,
+            let idx = vm.rowIndexByID[firstID],
+            idx < vm.activeSortedRows.count
+        else { return nil }
+        return vm.activeSortedRows[idx]
     }
+
     
     // Debounced selection change handler
     private func handleSelectionChange() {
@@ -209,15 +214,11 @@ struct ContentView: View {
     // MARK: - SIMPLIFIED Results Table with Native Sorting
     /// Apply the sortOrder to get native column header sorting
     var sortedResults: [TableRow] {
-        if sortOrder.isEmpty {
-            return vm.flattenedResults
-        } else {
-            return vm.flattenedResults.sorted(using: sortOrder)
-        }
+        vm.activeSortedRows
     }
     
     var tableView: some View {
-        Table(sortedResults, selection: $tableSelection, sortOrder: $sortOrder) {
+        Table(vm.activeSortedRows, selection: $tableSelection, sortOrder: $sortOrder) {
             // Reference column with deletion checkbox
             TableColumn("Reference", value: \.reference) { row in
                 HStack(spacing: 8) {
@@ -271,16 +272,19 @@ struct ContentView: View {
         .tableStyle(.automatic)
         .navigationTitle("Results")
         .focused($isTableFocused)
+        .onChange(of: sortOrder) { _, new in
+            vm.applySort(new)          // recompute once per header click
+        }
         .onAppear {
-            // Ensure focus when table appears with data
-            if !sortedResults.isEmpty && tableSelection.isEmpty {
-                if let firstRow = sortedResults.first {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        tableSelection = [firstRow.id]
-                        isTableFocused = true
-                    }
-                }
-            }
+            vm.applySort(sortOrder)
+//            if !vm.activeSortedRows.isEmpty && tableSelection.isEmpty {
+//                if let firstRow = vm.activeSortedRows.first {
+//                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+//                        tableSelection = [firstRow.id]
+//                        isTableFocused = true
+//                    }
+//                }
+//            }
         }
     }
     
