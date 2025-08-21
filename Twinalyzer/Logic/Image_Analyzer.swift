@@ -21,7 +21,7 @@ import CoreGraphics
 import ImageIO
 @preconcurrency import Vision
 @preconcurrency import CoreImage
-
+import Darwin
 // MARK: - Main Image Analysis Engine
 /// Static enum containing all image analysis functionality
 /// Provides both AI-based deep feature analysis and traditional perceptual hashing
@@ -53,6 +53,18 @@ public enum ImageAnalyzer {
             }
         }
     }
+    
+    @inline(__always)
+    private func _withQoS<T>(_ qos: qos_class_t, _ body: () -> T) -> T {
+        var oldQos: qos_class_t = QOS_CLASS_DEFAULT
+        var oldRel: Int32 = 0
+        pthread_get_qos_class_np(pthread_self(), &oldQos, &oldRel)
+        pthread_set_qos_class_self_np(qos, 0)
+        let out = body()
+        pthread_set_qos_class_self_np(oldQos, oldRel)
+        return out
+    }
+    
 
     // MARK: - Deep Feature Analysis (AI-Based)
     /// Primary analysis method using Apple's Vision framework for intelligent similarity detection
@@ -68,7 +80,7 @@ public enum ImageAnalyzer {
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
     ) {
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             guard shouldCancel?() != true else {
                 await MainActor.run { completion([]) }
                 return
@@ -164,7 +176,7 @@ public enum ImageAnalyzer {
         // 64-bit hash allows 0-64 bit differences
         let maxDist = max(0, min(64, Int((1.0 - similarityThreshold) * 64.0)))
         
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             let pairs = await computeHashPairs(
                 folders: leafFolders,  // FIXED: Use exact folders
                 topLevelOnly: topLevelOnly,
@@ -395,7 +407,7 @@ public enum ImageAnalyzer {
                 await Task.yield()
             }
             
-            if let hash = blockHash(for: file) {
+            if let hash = await blockHash(for: file) {
                 hashes.append((path: file.path, hash: hash))
             }
             
@@ -734,8 +746,13 @@ public enum ImageAnalyzer {
 
     /// Convenience method to generate perceptual hash directly from image file
     /// Handles downsampling for consistent hash generation
-    public nonisolated static func blockHash(for imageURL: URL) -> UInt64? {
-        guard let cg = downsampledCGImage(from: imageURL, to: CGSize(width: 32, height: 32)) else { return nil }
+    public nonisolated static func blockHash(for imageURL: URL) async -> UInt64? {
+        let cg = await ImageProcessingUtilities.downsampledCGImageWithTimeout(
+            at: imageURL,
+            targetMaxDimension: 32,
+            timeout: 10
+        )
+        guard let cg else { return nil }
         return blockHash(for: cg)
     }
 
@@ -750,18 +767,47 @@ public enum ImageAnalyzer {
     /// Uses ImageIO for efficient thumbnail generation with orientation handling
     /// Essential for memory management when processing large image collections
     /// ENHANCED: Added error handling and timeout protection
-    public nonisolated static func downsampledCGImage(from url: URL, to size: CGSize) -> CGImage? {
-        autoreleasepool {
-            guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-            let maxDimension = Int(max(size.width, size.height))
-            let opts: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceShouldCache: false,
-                kCGImageSourceShouldCacheImmediately: false,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxDimension
-            ]
-            return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+    public nonisolated static func downsampledCGImage(from url: URL, to size: CGSize) async -> CGImage? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                autoreleasepool {
+                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    let maxDimension = Int(max(size.width, size.height))
+                    let opts: [CFString: Any] = [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceShouldCache: false,
+                        kCGImageSourceShouldCacheImmediately: false,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: maxDimension
+                    ]
+                    let img = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+                    continuation.resume(returning: img)
+                }
+            }
+        }
+    }
+    
+    public nonisolated static func downsampledCGImageAsync(from url: URL, to size: CGSize) async -> CGImage? {
+        await withCheckedContinuation { cont in
+            // Run the ImageIO decode off the main thread at a matching QoS
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img: CGImage? = autoreleasepool {
+                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+                    let maxDimension = Int(max(size.width, size.height))
+                    let opts: [CFString: Any] = [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceShouldCache: false,
+                        kCGImageSourceShouldCacheImmediately: false,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: maxDimension
+                    ]
+                    return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+                }
+                cont.resume(returning: img)
+            }
         }
     }
     

@@ -126,60 +126,65 @@ public enum ImageProcessingUtilities {
     private nonisolated static let processingTimeout: TimeInterval = 15.0  // 15 second timeout
     private nonisolated static let maxImageDimension: CGFloat = 8192       // Reject extremely large images
     
-    // MARK: - Enhanced Thumbnail Generation
-    /// Creates a downsampled CGImage from a file URL using ImageIO for efficiency
-    public nonisolated static func downsampledCGImage(at url: URL, targetMaxDimension: CGFloat) -> CGImage? {
-        return autoreleasepool {
-            // Early validation: Check if file exists and is reasonable size
-            guard let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                  fileSize > 0,
-                  fileSize < 500 * 1024 * 1024 else { // Reject files > 500MB
-                return nil
-            }
-            
-            // Create image source
-            guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-                return nil
-            }
-            
-            // Validate image dimensions to prevent memory issues
-            if let properties = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
-                let width = properties[kCGImagePropertyPixelWidth] as? CGFloat ?? 0
-                let height = properties[kCGImagePropertyPixelHeight] as? CGFloat ?? 0
-                if width > maxImageDimension || height > maxImageDimension {
-                    print("Warning: Skipping extremely large image: \(Int(width))x\(Int(height)) - \(url.lastPathComponent)")
-                    return nil
+    public nonisolated static func runWithQoS<T>(
+            _ qos: DispatchQoS.QoSClass,
+            _ work: @escaping () -> T
+        ) -> T {
+            DispatchQueue.global(qos: qos).sync(execute: work)
+        }
+
+        public nonisolated static func downsampledCGImage(
+            at url: URL,
+            targetMaxDimension: CGFloat,
+            qos: DispatchQoS.QoSClass = .userInitiated   // <- NEW
+        ) -> CGImage? {
+            return runWithQoS(qos) {                     // <- NEW
+                autoreleasepool {
+                    guard let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                          fileSize > 0, fileSize < 500 * 1024 * 1024 else { return nil }
+                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+                    if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
+                        let w = props[kCGImagePropertyPixelWidth] as? CGFloat ?? 0
+                        let h = props[kCGImagePropertyPixelHeight] as? CGFloat ?? 0
+                        if w > maxImageDimension || h > maxImageDimension { return nil }
+                    }
+
+                    let options: [CFString: Any] = [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceShouldCache: false,
+                        kCGImageSourceThumbnailMaxPixelSize: Int(targetMaxDimension)
+                    ]
+                    return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
                 }
             }
-            
-            // Configure thumbnail generation options
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCache: false,
-                kCGImageSourceThumbnailMaxPixelSize: Int(targetMaxDimension)
-            ]
-            
-            return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
         }
-    }
-    
-    /// Synchronous generator wrapped in an async timeout race
-    /// NOTE: `timeout` is optional to avoid referencing a private const in a default argument.
+
     public nonisolated static func downsampledCGImageWithTimeout(
         at url: URL,
         targetMaxDimension: CGFloat,
         timeout: TimeInterval? = nil
     ) async -> CGImage? {
         let effectiveTimeout = timeout ?? processingTimeout
+
         return await withTaskGroup(of: CGImage?.self) { group in
-            group.addTask {
-                return downsampledCGImage(at: url, targetMaxDimension: targetMaxDimension)
+            // Run the decode on a lower-QoS GCD thread, not on the caller's task thread.
+            group.addTask(priority: .utility) {
+                await withCheckedContinuation { cont in
+                    DispatchQueue.global(qos: .utility).async {
+                        let img = downsampledCGImage(at: url, targetMaxDimension: targetMaxDimension)
+                        cont.resume(returning: img)
+                    }
+                }
             }
+
+            // Timeout race
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(effectiveTimeout * 1_000_000_000))
                 return nil
             }
+
             let result = await group.next()
             group.cancelAll()
             return result ?? nil

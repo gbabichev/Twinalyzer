@@ -38,7 +38,7 @@ struct PreviewImage: View {
     init(path: String, maxDimension: CGFloat) {
         self.path = path
         self.maxDimension = maxDimension
-        self.priority = .userInitiated
+        self.priority = .utility
     }
     
     /// Priority-aware initializer for performance tuning
@@ -194,7 +194,7 @@ struct PreviewImage: View {
         let cg = await ImageProcessingUtilities.downsampledCGImageWithTimeout(
             at: url,
             targetMaxDimension: CGFloat(bucket),
-            timeout: Self.loadingTimeout
+            timeout: Self.loadingTimeout,
         )
 
         // 5) Final cancellation / state
