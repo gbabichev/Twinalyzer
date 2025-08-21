@@ -95,7 +95,6 @@ struct ContentView: View {
                 } label: {
                     Label("Open Folder", systemImage: "folder")
                 }
-                .keyboardShortcut("o", modifiers: [.command])
                 .disabled(vm.isAnyOperationRunning) // Disable during processing
                 
                 Button {
@@ -103,7 +102,6 @@ struct ContentView: View {
                 } label: {
                     Label("Clear Folders", systemImage: "arrow.counterclockwise")
                 }
-                .keyboardShortcut("l", modifiers: [.command])
                 .disabled(vm.selectedParentFolders.isEmpty || vm.isAnyOperationRunning) // Disable during processing
                 .help("Clear all selected folders")
                 
@@ -152,7 +150,6 @@ struct ContentView: View {
                                 .fontWeight(.medium)
                         }
                     }
-                    .keyboardShortcut(.delete, modifiers: [.command])
                     .help("Delete \(vm.selectedMatchesForDeletion.count) selected match\(vm.selectedMatchesForDeletion.count == 1 ? "" : "es")")
                     .disabled(vm.isAnyOperationRunning) // Disable during processing
                 }
@@ -164,7 +161,6 @@ struct ContentView: View {
                     } label: {
                         Label("Cancel", systemImage: "xmark.circle")
                     }
-                    .keyboardShortcut(.escape)
                 } else {
                     // Ready state: Show analyze button when ready to process
                     Button {
@@ -176,7 +172,6 @@ struct ContentView: View {
                     } label: {
                         Label("Analyze", systemImage: "wand.and.stars")
                     }
-                    .keyboardShortcut("p", modifiers: [.command])
                     .disabled(vm.activeLeafFolders.isEmpty)
                 }
             }

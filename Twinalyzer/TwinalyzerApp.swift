@@ -53,15 +53,15 @@ struct ActionsCommands: Commands {
                 Label("Open Folder…", systemImage: "folder")
             }
             .keyboardShortcut("o", modifiers: [.command])
-            .disabled(viewModel.isProcessing)
+            .disabled(viewModel.isAnyOperationRunning)
 
             Button {
                 viewModel.triggerCSVExport()
             } label: {
                 Label("Export CSV…", systemImage: "tablecells")
             }
-            .disabled(viewModel.isProcessing || viewModel.comparisonResults.isEmpty)
-
+            .keyboardShortcut("e", modifiers: [.command, .shift]) // ⇧⌘E
+            .disabled(viewModel.isAnyOperationRunning || viewModel.comparisonResults.isEmpty)
         }
         
 
