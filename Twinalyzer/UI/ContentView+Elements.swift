@@ -206,24 +206,31 @@ extension ContentView {
         .padding(20)
     }
     
-    // MARK: - Cross-Folder Duplicates Panel (STATIC)
+    // MARK: - Cross-Folder Duplicates Panel (Simplified — no Sections, no thumbnails)
+    // Replace your duplicatesFolderPanel in ContentView+Elements.swift with this:
+
     var duplicatesFolderPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // Use the static snapshot data (computed once per analysis run)
+        let clusters = vm.folderClustersStatic
+        
+        return VStack(alignment: .leading, spacing: 8) {
+            // Header
             HStack {
                 Text("Cross-Folder Duplicates")
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()
-                if !vm.folderClustersStatic.isEmpty {
-                    Text("\(vm.folderClustersStatic.count) relationship\(vm.folderClustersStatic.count == 1 ? "" : "s")")
+                if !clusters.isEmpty {
+                    Text("\(clusters.count) relationship\(clusters.count == 1 ? "" : "s")")
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            
-            if vm.folderClustersStatic.isEmpty {
+
+            if clusters.isEmpty {
+                // Empty state
                 VStack(spacing: 8) {
                     Image(systemName: "folder.badge.questionmark")
                         .font(.system(size: 24))
@@ -239,16 +246,17 @@ extension ContentView {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // Simple list using static data - no expensive computation!
                 List {
-                    ForEach(Array(vm.folderClustersStatic.enumerated()), id: \.offset) { i, cluster in
+                    ForEach(Array(clusters.enumerated()), id: \.offset) { index, cluster in
                         Section {
-                            ForEach(cluster.indices, id: \.self) { j in
-                                let folder = cluster[j]
-                                folderRow(folder: folder)
+                            ForEach(cluster.indices, id: \.self) { folderIndex in
+                                let folder = cluster[folderIndex]
+                                folderRowStatic(folder: folder)
                             }
                         } header: {
                             HStack {
-                                Text("Group \(i + 1)")
+                                Text("Group \(index + 1)")
                                     .font(.caption)
                                     .fontWeight(.medium)
                                 Spacer()
@@ -261,17 +269,20 @@ extension ContentView {
                 }
                 .listStyle(.sidebar)
             }
+
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
-    private func folderRow(folder: String) -> some View {
+
+    // Add this helper method to ContentView+Elements.swift:
+    private func folderRowStatic(folder: String) -> some View {
         Button(action: { vm.openFolderInFinder(folder) }) {
             HStack(alignment: .center, spacing: 8) {
                 let url = URL(fileURLWithPath: folder)
                 let displayName = DisplayHelpers.formatFolderDisplayName(for: url)
                 
+                // Folder name with middle truncation for long paths
                 Text(displayName)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
@@ -280,6 +291,7 @@ extension ContentView {
                 Spacer(minLength: 0)
                 
                 HStack(spacing: 6) {
+                    // Representative thumbnail from static data
                     if let imagePath = vm.representativeImageByFolderStatic[folder] {
                         PreviewImage(path: imagePath, maxDimension: 24)
                             .frame(width: 24, height: 24)
@@ -290,6 +302,8 @@ extension ContentView {
                                     .stroke(Color.gray.opacity(0.25), lineWidth: 1)
                             )
                     }
+                    
+                    // Duplicate count badge from static data
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("\(vm.crossFolderDuplicateCountsStatic[folder, default: 0])")
                             .font(.system(size: 14, weight: .semibold))
@@ -421,8 +435,8 @@ extension ContentView {
     /// Right panel with vertical split: cross-folder duplicates on top, preview on bottom
     var detailSplitView: some View {
         VSplitView {
-            duplicatesFolderPanel
-                .frame(minHeight: 150, idealHeight: 200)
+//            duplicatesFolderPanel
+//                .frame(minHeight: 150, idealHeight: 200)
             
             previewPanel
                 .frame(minHeight: 200)
