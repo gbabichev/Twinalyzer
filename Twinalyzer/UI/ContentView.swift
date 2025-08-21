@@ -221,7 +221,7 @@ struct ContentView: View {
                 
                 await MainActor.run {
                     if !droppedURLs.isEmpty {
-                        vm.addParentFolders(droppedURLs)
+                        vm.ingestDroppedURLs(droppedURLs)
                     }
                 }
             }

@@ -282,6 +282,64 @@ final class AppViewModel: ObservableObject {
         }
         if !toRescan.isEmpty { rescanSelectedParents(toRescan) }
     }
+
+    /// Unified entry point for .onDrop — routes directories that *contain images* to leaf handling,
+    /// otherwise treats them as parent folders to be (re)discovered.
+    @MainActor
+    func ingestDroppedURLs(_ urls: [URL]) {
+        let dirs = FileSystemHelpers.filterDirectories(from: urls).map { $0.standardizedFileURL }
+        guard !dirs.isEmpty else { return }
+
+        var leaves: [URL] = []
+        var parents: [URL] = []
+        let ignored = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for dir in dirs {
+            if directoryContainsImageFiles(dir, ignoredName: ignored) {
+                leaves.append(dir)
+            } else {
+                parents.append(dir)
+            }
+        }
+
+        if !leaves.isEmpty { addLeafFolders(leaves) }
+        if !parents.isEmpty { addParentFolders(parents) }
+    }
+
+    /// Adds *leaf* folders directly (useful when the user drops a folder that already contains images).
+    /// Ensures deduping, removes matching exclusions, and keeps list stable.
+    @MainActor
+    private func addLeafFolders(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+
+        // Normalize dropped URLs once
+        let dropped = urls.map { $0.standardizedFileURL }
+        let droppedSet = Set(dropped)
+
+        var changed = false
+
+        // 1) Explicit user action: un-exclude these leaves even if already discovered.
+        let beforeExCount = excludedLeafFolders.count
+        excludedLeafFolders = excludedLeafFolders.filter { ex in
+            !droppedSet.contains(ex.standardizedFileURL)
+        }
+        if excludedLeafFolders.count != beforeExCount { changed = true }
+
+        // 2) Append any truly new leaves (dedupe against discovered)
+        var seen = Set(discoveredLeafFolders.map { $0.standardizedFileURL })
+        for s in dropped {
+            if !seen.contains(s) {
+                discoveredLeafFolders.append(s)
+                seen.insert(s)
+                changed = true
+            }
+        }
+
+        // 3) Reconcile if anything changed so UI reflects the update
+        if changed {
+            reconcileExclusionsWithDiscovered()
+        }
+    }
     @MainActor
     private func rescanSelectedParents(_ parents: [URL]) {
         guard !parents.isEmpty else { return }
@@ -375,6 +433,30 @@ final class AppViewModel: ObservableObject {
         }
         return discovered
     }
+    /// Quick heuristic: a directory is a "leaf" if it directly contains image files (regardless of subfolders).
+    /// Mirrors the logic used in `findLeafFoldersWithIgnoreFilter` for the current directory only.
+    private func directoryContainsImageFiles(_ directory: URL, ignoredName: String) -> Bool {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return false }
+        let imageExtensions: Set<String> = ["jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"]
+        for item in contents {
+            if let rv = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]) {
+                if rv.isDirectory == true {
+                    // Skip ignored subfolders for consistency
+                    let subfolderName = item.lastPathComponent.lowercased()
+                    if !ignoredName.isEmpty && subfolderName == ignoredName { continue }
+                } else if rv.isRegularFile == true {
+                    if imageExtensions.contains(item.pathExtension.lowercased()) { return true }
+                }
+            }
+        }
+        return false
+    }
+
     private func findLeafFoldersWithIgnoreFilter(root: URL, ignoredName: String) async -> [URL] {
         return await Task.detached {
             let fm = FileManager.default

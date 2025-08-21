@@ -90,7 +90,8 @@ extension ContentView {
         panel.title = "Select Parent Folders to Scan"
         
         if panel.runModal() == .OK {
-            vm.addParentFolders(panel.urls)
+            vm.ingestDroppedURLs(panel.urls)
+            //vm.addParentFolders(panel.urls)
         }
     }
 
