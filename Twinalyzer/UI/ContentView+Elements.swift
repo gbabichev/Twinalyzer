@@ -306,16 +306,41 @@ extension ContentView {
                         ForEach(Array(clusters.enumerated()), id: \.offset) { index, cluster in
                             // Two-line compact row
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(vm.folderDisplayNamesStatic[cluster[0]] ?? cluster[0])
-                                    .font(.system(size: 13, weight: .medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text(vm.folderDisplayNamesStatic[cluster[1]] ?? cluster[1])
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
+                                HStack {
+                                    Button {
+                                        vm.openFolderInFinder(cluster[0])
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "folder")
+                                                .foregroundStyle(.secondary)
+                                            Text(vm.folderDisplayNamesStatic[cluster[0]] ?? cluster[0])
+                                                .font(.system(size: 13, weight: .medium))
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Open in Finder")
+                                }
+
+                                HStack {
+                                    Button {
+                                        vm.openFolderInFinder(cluster[1])
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "folder")
+                                                .foregroundStyle(.secondary)
+                                            Text(vm.folderDisplayNamesStatic[cluster[1]] ?? cluster[1])
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Open in Finder")
+                                }
+                                .padding(.leading, 16)
                             }
+                            Divider()
                             .contentShape(Rectangle())
                             .padding(.vertical, 2)
                         }

@@ -34,10 +34,6 @@ enum DisplayHelpers {
         "\(Int(round(value * 100)))%"
     }
     
-    /// Determines if a table row represents a cross-folder match
-    static func isCrossFolder(_ row: TableRow) -> Bool {
-        return row.isCrossFolder
-    }
     
     /// Formats a folder path for display, showing parent/folder structure
     /// Creates a hierarchical display like "Photos/Vacation" for better folder identification
