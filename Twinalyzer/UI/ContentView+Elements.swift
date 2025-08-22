@@ -267,17 +267,17 @@ extension ContentView {
     }
     
     // MARK: - Cross-Folder Duplicates Panel
+    // MARK: - Cross-Folder Duplicates Panel
     var duplicatesFolderPanel: some View {
-        // Use the static snapshot from AppViewModel
-        let clusters = vm.folderClustersStatic
-        
+        let pairs = vm.orderedCrossFolderPairsStatic
+
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Cross-Folder Duplicates")
                     .font(.headline).fontWeight(.semibold)
                 Spacer()
-                if !clusters.isEmpty {
-                    Text("\(clusters.count) relationship\(clusters.count == 1 ? "" : "s")")
+                if !pairs.isEmpty {
+                    Text("\(pairs.count) relationship\(pairs.count == 1 ? "" : "s")")
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 }
@@ -285,7 +285,7 @@ extension ContentView {
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
-            if clusters.isEmpty {
+            if pairs.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "folder.badge.questionmark")
                         .font(.system(size: 24))
@@ -303,17 +303,17 @@ extension ContentView {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(clusters.enumerated()), id: \.offset) { index, cluster in
-                            // Two-line compact row
+                        ForEach(pairs) { pair in
                             VStack(alignment: .leading, spacing: 2) {
+                                // Reference row
                                 HStack {
                                     Button {
-                                        vm.openFolderInFinder(cluster[0])
+                                        vm.openFolderInFinder(pair.reference)
                                     } label: {
-                                        HStack(spacing: 4) {
+                                        HStack(spacing: 6) {
                                             Image(systemName: "folder")
                                                 .foregroundStyle(.secondary)
-                                            Text(vm.folderDisplayNamesStatic[cluster[0]] ?? cluster[0])
+                                            Text(vm.folderDisplayNamesStatic[pair.reference] ?? pair.reference)
                                                 .font(.system(size: 13, weight: .medium))
                                                 .lineLimit(1)
                                                 .truncationMode(.middle)
@@ -321,18 +321,28 @@ extension ContentView {
                                     }
                                     .buttonStyle(.plain)
                                     .help("Open in Finder")
+
+                                    Spacer(minLength: 8)
+
+                                    // Optional strength badge
+                                    Text("×\(pair.count)")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.tertiary)
                                 }
 
+                                // Match row (indented)
                                 HStack {
                                     Button {
-                                        vm.openFolderInFinder(cluster[1])
+                                        vm.openFolderInFinder(pair.match)
                                     } label: {
-                                        HStack(spacing: 4) {
+                                        HStack(spacing: 6) {
                                             Image(systemName: "folder")
                                                 .foregroundStyle(.secondary)
-                                            Text(vm.folderDisplayNamesStatic[cluster[1]] ?? cluster[1])
+                                            Text(vm.folderDisplayNamesStatic[pair.match] ?? pair.match)
                                                 .font(.system(size: 12))
                                                 .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
                                         }
                                     }
                                     .buttonStyle(.plain)
@@ -341,8 +351,8 @@ extension ContentView {
                                 .padding(.leading, 16)
                             }
                             Divider()
-                            .contentShape(Rectangle())
-                            .padding(.vertical, 2)
+                                .contentShape(Rectangle())
+                                .padding(.vertical, 2)
                         }
                     }
                     .padding(.horizontal, 12)
@@ -355,7 +365,6 @@ extension ContentView {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-
     // MARK: - Preview Panel
     var previewPanel: some View {
         GeometryReader { geometry in

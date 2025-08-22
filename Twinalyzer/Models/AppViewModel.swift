@@ -53,6 +53,16 @@ final class AppViewModel: ObservableObject {
     @Published var representativeImageByFolderStatic: [String: String] = [:]
     @Published var crossFolderDuplicateCountsStatic: [String: Int] = [:]
     @Published var folderDisplayNamesStatic: [String: String] = [:]
+
+    // Ordered cross-folder pairs following table reference→match direction
+    struct OrderedFolderPair: Identifiable, Hashable {
+        let id = UUID()
+        let reference: String
+        let match: String
+        let count: Int
+    }
+    @Published var orderedCrossFolderPairsStatic: [OrderedFolderPair] = []
+
     
     // MARK: - Performance Cache Storage
     private var _tableRowsCache: [TableRow]?
@@ -497,21 +507,22 @@ final class AppViewModel: ObservableObject {
     }
     
     /// Builds the frozen snapshot from the current comparison results
-    private func buildFolderDuplicatesSnapshot() {
+    
+private func buildFolderDuplicatesSnapshot() {
         let rows = tableRows
-        
+
         // Representative image per folder
         var reps: [String: String] = [:]
         // Display names cache
         var displayNames: [String: String] = [:]
-        
+
         for row in rows {
             let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
             let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-            
+
             if reps[refFolder] == nil { reps[refFolder] = row.reference }
             if reps[matchFolder] == nil { reps[matchFolder] = row.similar }
-            
+
             // Cache display names
             if displayNames[refFolder] == nil {
                 displayNames[refFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: refFolder))
@@ -520,18 +531,18 @@ final class AppViewModel: ObservableObject {
                 displayNames[matchFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: matchFolder))
             }
         }
-        
-        // Cross-folder counts (bidirectional)
-        var counts: [String: Int] = [:]
+
+        // Cross-folder counts (per folder, bidirectional)
+        var folderHitCounts: [String: Int] = [:]
         for row in rows {
             let ref = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
             let match = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
             guard ref != match else { continue }
-            counts[ref, default: 0] += 1
-            counts[match, default: 0] += 1
+            folderHitCounts[ref, default: 0] += 1
+            folderHitCounts[match, default: 0] += 1
         }
-        
-        // Folder relationship clusters
+
+        // Folder relationship clusters (unordered unique pairs)
         var folderPairs: Set<[String]> = []
         for row in rows {
             let a = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
@@ -540,13 +551,59 @@ final class AppViewModel: ObservableObject {
             folderPairs.insert([a, b].sorted())
         }
         let clusters = Array(folderPairs).sorted { $0[0] < $1[0] }
-        
+
+        // Directional majority (reference → match) to mirror table direction
+        struct DirKey: Hashable { let ref: String; let match: String }
+        struct UnKey: Hashable { let a: String; let b: String }
+        var directional: [DirKey: Int] = [:]
+        for row in rows {
+            let rf = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+            let mf = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+            guard rf != mf else { continue }
+            directional[DirKey(ref: rf, match: mf), default: 0] += 1
+        }
+
+        var totals: [UnKey: (ab: Int, ba: Int)] = [:]
+        for (k, c) in directional {
+            if k.ref <= k.match {
+                let u = UnKey(a: k.ref, b: k.match)
+                var t = totals[u] ?? (ab: 0, ba: 0)
+                t.ab += c
+                totals[u] = t
+            } else {
+                let u = UnKey(a: k.match, b: k.ref)
+                var t = totals[u] ?? (ab: 0, ba: 0)
+                t.ba += c
+                totals[u] = t
+            }
+        }
+
+        var orderedPairs: [OrderedFolderPair] = []
+        orderedPairs.reserveCapacity(totals.count)
+        for (u, t) in totals {
+            if t.ab > t.ba {
+                orderedPairs.append(.init(reference: u.a, match: u.b, count: t.ab))
+            } else if t.ba > t.ab {
+                orderedPairs.append(.init(reference: u.b, match: u.a, count: t.ba))
+            } else {
+                // tie → deterministic
+                orderedPairs.append(.init(reference: u.a, match: u.b, count: t.ab))
+            }
+        }
+        orderedPairs.sort {
+            if $0.count != $1.count { return $0.count > $1.count }
+            if $0.reference != $1.reference { return $0.reference < $1.reference }
+            return $0.match < $1.match
+        }
+
         // Commit the snapshot
         self.representativeImageByFolderStatic = reps
-        self.crossFolderDuplicateCountsStatic = counts
+        self.crossFolderDuplicateCountsStatic = folderHitCounts
         self.folderClustersStatic = clusters
         self.folderDisplayNamesStatic = displayNames
+        self.orderedCrossFolderPairsStatic = orderedPairs
     }
+
     
     func cancelAnalysis() {
         cancelAllOperations()
@@ -727,3 +784,4 @@ final class AppViewModel: ObservableObject {
         )
     }
 }
+
