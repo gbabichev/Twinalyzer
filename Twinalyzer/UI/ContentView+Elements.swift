@@ -66,7 +66,7 @@ extension ContentView {
                             .buttonStyle(.plain)
                         }
 
-                        ScrollView(.vertical, showsIndicators: true) {
+                        ScrollView(.vertical, showsIndicators: false) {
                             LazyVStack(alignment: .center, spacing: 2) {
                                 // Top sentinel flips atTop as you scroll away/return
                                 Color.clear

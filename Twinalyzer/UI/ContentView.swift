@@ -15,8 +15,8 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     
     // MARK: - Constant for building the Preview Layout
-    let columnWidth: CGFloat = 1000
-    let viewportHeight: CGFloat = 200
+    let columnWidth: CGFloat = 800
+    let viewportHeight: CGFloat = 400
     @State var atBottom = false
     @State var atTop = true
     
@@ -56,11 +56,10 @@ struct ContentView: View {
                 NavigationSplitView {
                     sidebarContent
                         .navigationSplitViewColumnWidth(min: 100, ideal:200, max:300)
-                } detail: {
+                } content: {
                     tableView
-                        .inspector(isPresented: $showInspector) {
-                            detailSplitView
-                        }
+                } detail: {
+                    detailSplitView
                 }
                 .navigationSplitViewStyle(.prominentDetail)
                 .animation(.none, value: showInspector) // Disable entire split view animation during inspector transitions
@@ -104,16 +103,6 @@ struct ContentView: View {
 
             // RIGHT: Primary actions
             ToolbarItemGroup(placement: .primaryAction) {
-                // Inspector toggle button
-                Button {
-                    showInspector.toggle()
-                } label: {
-                    Label(showInspector ? "Hide Inspector" : "Show Inspector",
-                          systemImage: showInspector ? "sidebar.trailing" : "sidebar.right")
-                }
-                .help(showInspector ? "Hide the inspector panel" : "Show the inspector panel")
-                .keyboardShortcut("]", modifiers: [.command, .option])
-                
                 // Clear selection button
                 if !vm.selectedMatchesForDeletion.isEmpty {
                     Button {
@@ -153,7 +142,7 @@ struct ContentView: View {
                         Label("Cancel", systemImage: "xmark.circle")
                     }
                 } else {
-                    // Ready state: Show analyze button when ready to process
+                    // Ready state
                     Button {
                         // Clear selection states when starting new analysis
                         //tableSelection.removeAll()
