@@ -106,7 +106,7 @@ struct ContentView: View {
                 } label: {
                     Label("Clear Folders", systemImage: "arrow.counterclockwise")
                 }
-                .disabled(vm.selectedParentFolders.isEmpty || vm.isAnyOperationRunning)
+                .disabled(vm.activeLeafFolders.isEmpty || vm.isAnyOperationRunning)
                 .help("Clear all selected folders")
                 
                 Button {
@@ -179,8 +179,8 @@ struct ContentView: View {
                     // Ready state: Show analyze button when ready to process
                     Button {
                         // Clear selection states when starting new analysis
-                        tableSelection.removeAll()
-                        vm.clearSelection()
+                        //tableSelection.removeAll()
+                        //vm.clearSelection()
                         vm.processImages(progress: { _ in })
                     } label: {
                         Label("Analyze", systemImage: "wand.and.stars")

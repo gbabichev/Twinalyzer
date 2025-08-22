@@ -8,7 +8,7 @@
  */
 
 import SwiftUI
-
+import UserNotifications
 @main
 struct TwinalyzerApp: App {
     init() {
@@ -24,6 +24,10 @@ struct TwinalyzerApp: App {
                 .environmentObject(appViewModel)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     appViewModel.clearDockBadge()
+                }
+                .task {
+                    // Runs once when ContentView appears on launch
+                    await requestNotificationAuthIfNeeded()
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -56,7 +60,7 @@ struct ActionsCommands: Commands {
                 Label("Open Folder…", systemImage: "folder")
             }
             .keyboardShortcut("o", modifiers: [.command])
-            .disabled(viewModel.isAnyOperationRunning)
+            .disabled(viewModel.isAnyOperationRunning) // FIXED: Use isAnyOperationRunning consistently
 
             Button {
                 viewModel.triggerCSVExport()
@@ -64,11 +68,8 @@ struct ActionsCommands: Commands {
                 Label("Export CSV…", systemImage: "tablecells")
             }
             .keyboardShortcut("e", modifiers: [.command, .shift]) // ⇧⌘E
-            .disabled(viewModel.isAnyOperationRunning || viewModel.comparisonResults.isEmpty)
+            .disabled(viewModel.isAnyOperationRunning || viewModel.comparisonResults.isEmpty) // FIXED: Use isAnyOperationRunning
         }
-        
-
-
         
         CommandMenu("Actions") {
             if viewModel.isProcessing {
@@ -96,7 +97,7 @@ struct ActionsCommands: Commands {
                 Label("Delete Matches", systemImage: "trash")
             }
             .keyboardShortcut(.delete, modifiers: [.command])
-            .disabled(viewModel.isProcessing || !viewModel.hasSelectedMatches)
+            .disabled(viewModel.isAnyOperationRunning || !viewModel.hasSelectedMatches) // FIXED: Use isAnyOperationRunning
             
             Button {
                 viewModel.clearSelection()
@@ -104,7 +105,7 @@ struct ActionsCommands: Commands {
                 Label("Clear Selection", systemImage: "checkmark.circle.badge.xmark")
             }
             .keyboardShortcut("l", modifiers: [.command, .option])
-            .disabled(viewModel.isProcessing || !viewModel.hasSelectedMatches)
+            .disabled(viewModel.isAnyOperationRunning || !viewModel.hasSelectedMatches) // FIXED: Use isAnyOperationRunning
             
             Button {
                 viewModel.clearAll()
@@ -112,7 +113,7 @@ struct ActionsCommands: Commands {
                 Label("Clear All", systemImage: "arrow.counterclockwise")
             }
             .keyboardShortcut("l", modifiers: [.command])
-            .disabled(viewModel.selectedParentFolders.isEmpty || viewModel.isProcessing)
+            .disabled(viewModel.activeLeafFolders.isEmpty || viewModel.isAnyOperationRunning)
         }
 
         CommandGroup(replacing: .help) {
@@ -145,5 +146,23 @@ struct ActionsCommands: Commands {
         if panel.runModal() == .OK {
             viewModel.addParentFolders(panel.urls)
         }
+    }
+}
+
+@MainActor
+func requestNotificationAuthIfNeeded() async {
+    let center = UNUserNotificationCenter.current()
+    let settings = await center.notificationSettings()
+
+    switch settings.authorizationStatus {
+    case .notDetermined:
+        let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        print("🔔 Notifications granted? \(granted)")
+    case .denied:
+        print("🔕 Notifications denied by user.")
+    case .authorized, .provisional, .ephemeral:
+        print("✅ Notifications already authorized.")
+    @unknown default:
+        break
     }
 }

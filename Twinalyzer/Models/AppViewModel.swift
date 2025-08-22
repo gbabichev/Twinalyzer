@@ -855,10 +855,7 @@ final class AppViewModel: ObservableObject {
         }
 
         // 3) Reset the system badge (macOS 13+)
-        if #available(macOS 13.0, *) {
-            UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
-        }
+        UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
     }
-    
 }
 
