@@ -33,6 +33,7 @@ struct TwinalyzerApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             ActionsCommands(viewModel: appViewModel)
+            SidebarCommands()
         }
     
         // MARK: - Custom About Window
