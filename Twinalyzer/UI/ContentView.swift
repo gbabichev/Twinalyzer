@@ -12,13 +12,23 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     
-    // MARK: - Scroll State Management
-    @State var scrollOffset: CGFloat = 0
-    @State var isScrollable: Bool = false
-    @State var isScrolledToBottom: Bool = false
-    @State var contentHeight: CGFloat = 0
-    @State var visibleHeight: CGFloat = 200
     
+    
+    // Constants
+    let columnWidth: CGFloat = 1000
+    let viewportHeight: CGFloat = 200
+    
+    @State var atBottom = false
+    @State var atTop = true
+
+    
+    
+    
+    
+    
+    
+    
+    // MARK: - Scroll State Management
     @EnvironmentObject var vm: AppViewModel
     @State var showSettingsPopover = false
     

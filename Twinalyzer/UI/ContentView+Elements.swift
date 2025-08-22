@@ -10,135 +10,132 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Scroll Offset Preference Key
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
+
+
+
 
 extension ContentView {
     
     // MARK: - Processing View
+
     var processingView: some View {
         VStack(spacing: 16) {
             if vm.isDiscoveringFolders {
-                ProgressView().frame(width: 320)
-                Text("Discovering folders...").foregroundStyle(.secondary)
+                ProgressView()
+                    .frame(width: columnWidth)
+                Text("Discovering folders...")
+                    .foregroundStyle(.secondary)
             } else if vm.isProcessing {
                 if let p = vm.processingProgress {
-                    ProgressView(value: p).frame(width: 320)
-                    Text(DisplayHelpers.formatProcessingProgress(p)).foregroundStyle(.secondary)
+                    ProgressView(value: p)
+                        .frame(width: columnWidth)
+                    Text(DisplayHelpers.formatProcessingProgress(p))
+                        .foregroundStyle(.secondary)
                 } else {
-                    ProgressView().frame(width: 320)
-                    Text("Preparing analysis...").foregroundStyle(.secondary)
+                    ProgressView()
+                        .frame(width: columnWidth)
+                    Text("Preparing analysis...")
+                        .foregroundStyle(.secondary)
                 }
             }
-            folderListWithScrollIndicators
+
+            folderListFixedWidth
+                .frame(width: columnWidth)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Dead center in the window
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
-    
-    // MARK: - Folder List with Custom Scroll Indicators
-    var folderListWithScrollIndicators: some View { /* unchanged */
-        VStack(alignment: .leading, spacing: 6) {
+
+
+    var folderListFixedWidth: some View {
+        VStack(spacing: 6) {
             Text(vm.isDiscoveringFolders ? "Scanning Parent Folders..." : "Processing Folders...")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+
             if vm.allFoldersBeingProcessed.isEmpty {
-                Text("No folders selected.").foregroundStyle(.secondary)
+                Text("No folders selected.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else {
-                ZStack {
-                    ScrollViewReader { proxy in
-                        ScrollView(showsIndicators: false) {
-                            LazyVStack(alignment: .leading, spacing: 2) {
-                                ForEach(Array(vm.allFoldersBeingProcessed.enumerated()), id: \.offset) { index, url in
+                ScrollViewReader { proxy in
+                    VStack(spacing: 6) {
+                        // Top chevron — only when not at top
+                        if !atTop {
+                            Button {
+                                withAnimation(.easeInOut) { proxy.scrollTo("topSentinel", anchor: .top) }
+                            } label: {
+                                Image(systemName: "chevron.up")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        ScrollView(.vertical, showsIndicators: true) {
+                            LazyVStack(alignment: .center, spacing: 2) {
+                                // Top sentinel flips atTop as you scroll away/return
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("topSentinel")
+                                    .onAppear { atTop = true }
+                                    .onDisappear { atTop = false }
+
+                                ForEach(Array(vm.allFoldersBeingProcessed.enumerated()), id: \.offset) { _, url in
                                     Text(DisplayHelpers.shortDisplayPath(for: url.path))
                                         .font(.body)
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                        .id(index)
+                                        .truncationMode(.middle)
+                                        .frame(maxWidth: .infinity, alignment: .center) // centered rows
                                 }
+
+                                // Bottom sentinel flips atBottom at end
                                 Color.clear
                                     .frame(height: 1)
-                                    .onAppear { isScrolledToBottom = true }
-                                    .onDisappear { isScrolledToBottom = false }
+                                    .id("bottomSentinel")
+                                    .onAppear { atBottom = true }
+                                    .onDisappear { atBottom = false }
                             }
                             .padding(.vertical, 8)
-                            .padding(.bottom, isScrollable ? 40 : 0)
-                            .background(
-                                GeometryReader { contentGeometry in
-                                    Color.clear
-                                        .onAppear { contentHeight = contentGeometry.size.height }
-                                        .onChange(of: contentGeometry.size.height) { _, newHeight in
-                                            contentHeight = newHeight
-                                            updateScrollableState(availableHeight: 200)
-                                        }
-                                }
-                            )
                         }
-                        .background(
-                            GeometryReader { scrollGeometry in
-                                Color.clear
-                                    .preference(key: ScrollOffsetPreferenceKey.self,
-                                                value: scrollGeometry.frame(in: .named("scroll")).minY)
+                        .frame(width: columnWidth, height: viewportHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        // Bottom chevron — only when not at bottom
+                        if !atBottom {
+                            Button {
+                                withAnimation(.easeInOut) { proxy.scrollTo("bottomSentinel", anchor: .bottom) }
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
                             }
-                        )
-                        .coordinateSpace(name: "scroll")
-                        .onChange(of: vm.allFoldersBeingProcessed.count) { _, _ in
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                updateScrollableState(availableHeight: 200)
-                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                    LinearGradient(
-                        gradient: Gradient(stops: [
-                            .init(color: Color(NSColor.controlBackgroundColor), location: 0),
-                            .init(color: Color(NSColor.controlBackgroundColor).opacity(0), location: 1)
-                        ]),
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    .frame(height: 20)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .opacity(scrollOffset < -10 ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.2), value: scrollOffset < -10)
-                    
-                    VStack(spacing: 0) {
-                        LinearGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: Color(NSColor.controlBackgroundColor).opacity(0), location: 0),
-                                .init(color: Color(NSColor.controlBackgroundColor), location: 1)
-                            ]),
-                            startPoint: .top, endPoint: .bottom
-                        )
-                        .frame(height: 30)
-                        HStack {
-                            Spacer()
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary.opacity(0.8))
-                                .padding(.bottom, 4)
-                            Spacer()
-                        }
-                        .background(Color(NSColor.controlBackgroundColor))
-                    }
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .opacity(isScrollable && !isScrolledToBottom ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.2), value: isScrollable && !isScrolledToBottom)
-                }
-                .frame(maxHeight: 200)
-                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
-                    scrollOffset = value
-                }
-                .onAppear { updateScrollableState(availableHeight: 200) }
-                .onChange(of: vm.allFoldersBeingProcessed) { _, _ in
-                    updateScrollableState(availableHeight: 200)
+                    .frame(maxWidth: .infinity, alignment: .center) // center whole block
                 }
             }
         }
-        .fixedSize(horizontal: true, vertical: false)
     }
+
     
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
     // MARK: - Settings Panel
     var controlsPanelPopover: some View { /* unchanged */
         VStack(alignment: .leading, spacing: 16) {

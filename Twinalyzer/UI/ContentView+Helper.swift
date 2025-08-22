@@ -108,35 +108,6 @@ extension ContentView {
         sortOrder.removeAll()         // Table column sorting preferences
     }
 
-    // MARK: - Scroll State Updates
-    func updateScrollableState(availableHeight: CGFloat) {
-        visibleHeight = availableHeight
-        
-        // Simple heuristic: estimate content height based on folder count
-        // Each text row is roughly 20px (font + spacing), plus 16px padding
-        let estimatedContentHeight = CGFloat(vm.allFoldersBeingProcessed.count) * 22 + 16
-        
-        let wasScrollable = isScrollable
-        isScrollable = estimatedContentHeight > availableHeight
-        
-        // IMPORTANT: Update bottom state when scrollable state changes
-        if wasScrollable != isScrollable {
-            updateScrolledToBottomState()
-        }
-    }
-    
-    func updateScrolledToBottomState() {
-        // More accurate bottom detection
-        if isScrollable {
-            // Calculate how much we can actually scroll
-            let maxScrollDistance = max(0, contentHeight - visibleHeight)
-            // We're "at bottom" when we've scrolled at least 80% of the way down
-            let scrolledDistance = abs(scrollOffset)
-            isScrolledToBottom = scrolledDistance >= (maxScrollDistance * 0.8)
-        } else {
-            isScrolledToBottom = true // Non-scrollable content is considered "at bottom"
-        }
-    }
 }
 // MARK: - Simplified TableRow with Native Sorting Support
 /// Simplified table row that works perfectly with SwiftUI's native Table sorting
