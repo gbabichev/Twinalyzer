@@ -39,15 +39,14 @@ extension ContentView {
                 }
             }
 
-            folderListFixedWidth
+            processingFolderList
                 .frame(width: columnWidth)
         }
         // Dead center in the window
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-
-    var folderListFixedWidth: some View {
+    var processingFolderList: some View {
         VStack(spacing: 6) {
             Text(vm.isDiscoveringFolders ? "Scanning Parent Folders..." : "Processing Folders...")
                 .font(.subheadline)
@@ -120,24 +119,9 @@ extension ContentView {
             }
         }
     }
-
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
     // MARK: - Settings Panel
-    var controlsPanelPopover: some View { /* unchanged */
+    var settingsPanelPopover: some View { /* unchanged */
         VStack(alignment: .leading, spacing: 16) {
             Text("Settings").font(.headline)
             Divider()
@@ -201,106 +185,6 @@ extension ContentView {
             }
         }
         .padding(20)
-    }
-    
-    // MARK: - Cross-Folder Duplicates Panel (Simplified — no Sections, no thumbnails)
-    // Replace your duplicatesFolderPanel in ContentView+Elements.swift with this:
-    private struct FolderPair: Hashable {
-        let a: String
-        let b: String
-    }
-    
-    var duplicatesFolderPanel: some View {
-        // Convert your pair-style clusters [[String]] into stable, hashable rows
-        let pairs: [FolderPair] = vm.folderClusters.compactMap { cluster in
-            guard cluster.count == 2 else { return nil }
-            return FolderPair(a: cluster[0], b: cluster[1])
-        }
-
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Cross-Folder Duplicates")
-                    .font(.headline).fontWeight(.semibold)
-                Spacer()
-                if !pairs.isEmpty {
-                    Text("\(pairs.count) relationship\(pairs.count == 1 ? "" : "s")")
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-
-            if pairs.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "folder.badge.questionmark")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.secondary)
-                    Text("No cross-folder duplicate relationships found.")
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                    Text("Run an analysis to discover duplicates between different folders.")
-                        .foregroundStyle(.tertiary)
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Text-only, fully lazy, no sections
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(pairs, id: \.self) { p in
-                            // Two-line compact row: Matched\nReference
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: p.a)))
-                                    .font(.system(size: 13, weight: .medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text(DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: p.b)))
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            .contentShape(Rectangle()) // for future click support without Button
-                            .padding(.vertical, 2)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                }
-                .transaction { $0.disablesAnimations = true } // eliminate subtle anim hitches
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    
-    // MARK: - Preview Panel (unchanged)
-    var previewPanel: some View { /* unchanged from your latest file */
-        GeometryReader { geometry in
-            VStack {
-                if let row = selectedRow, !vm.flattenedResults.isEmpty {
-                    renderPreview(for: row, size: geometry.size)                } else {
-                    VStack(spacing: 8) {
-                        if vm.selectedMatchesForDeletion.count > 1 {
-                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
-                                .foregroundStyle(.secondary)
-                            Text("Press Delete or use toolbar button to delete selected matches")
-                                .foregroundStyle(.secondary)
-                                .font(.footnote)
-                        } else {
-                            Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-        }
     }
     
     // MARK: - Sidebar Content & Table View & Detail Split View
@@ -382,14 +266,7 @@ extension ContentView {
         .navigationTitle("Folders")
         .frame(minWidth: 250, idealWidth: 300)
     }
-    // MARK: - Results Table
-    /// Center panel displaying comparison results in sortable table format
-    /// Includes checkboxes for deletion selection and similarity percentages
-    // ContentView.swift - Table Section Only
-    // Replace your existing tableView with this simplified version
-
-    // MARK: - Results Table with Native Sorting
-    /// Simplified table that uses SwiftUI's native sorting - no custom caching!
+    
     // MARK: - Detail Split View
     /// Right panel with vertical split: cross-folder duplicates on top, preview on bottom
     var detailSplitView: some View {
@@ -401,4 +278,105 @@ extension ContentView {
                 .frame(minHeight: 200)
         }
     }
+    
+    // MARK: - Cross-Folder Duplicates Panel
+    private struct FolderPair: Hashable {
+        let a: String
+        let b: String
+    }
+    
+    var duplicatesFolderPanel: some View {
+        // Convert your pair-style clusters [[String]] into stable, hashable rows
+        let pairs: [FolderPair] = vm.folderClusters.compactMap { cluster in
+            guard cluster.count == 2 else { return nil }
+            return FolderPair(a: cluster[0], b: cluster[1])
+        }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Cross-Folder Duplicates")
+                    .font(.headline).fontWeight(.semibold)
+                Spacer()
+                if !pairs.isEmpty {
+                    Text("\(pairs.count) relationship\(pairs.count == 1 ? "" : "s")")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+
+            if pairs.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "folder.badge.questionmark")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                    Text("No cross-folder duplicate relationships found.")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                    Text("Run an analysis to discover duplicates between different folders.")
+                        .foregroundStyle(.tertiary)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Text-only, fully lazy, no sections
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(pairs, id: \.self) { p in
+                            // Two-line compact row: Matched\nReference
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: p.a)))
+                                    .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: p.b)))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .contentShape(Rectangle()) // for future click support without Button
+                            .padding(.vertical, 2)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                .transaction { $0.disablesAnimations = true } // eliminate subtle anim hitches
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Images Preview Panel
+    var previewPanel: some View { /* unchanged from your latest file */
+        GeometryReader { geometry in
+            VStack {
+                if let row = selectedRow, !vm.flattenedResults.isEmpty {
+                    renderPreview(for: row, size: geometry.size)                } else {
+                    VStack(spacing: 8) {
+                        if vm.selectedMatchesForDeletion.count > 1 {
+                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
+                                .foregroundStyle(.secondary)
+                            Text("Press Delete or use toolbar button to delete selected matches")
+                                .foregroundStyle(.secondary)
+                                .font(.footnote)
+                        } else {
+                            Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Results Table
+
 }
