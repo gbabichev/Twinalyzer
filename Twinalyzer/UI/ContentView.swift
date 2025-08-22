@@ -25,6 +25,9 @@ struct ContentView: View {
     @EnvironmentObject var vm: AppViewModel
     @State var showSettingsPopover = false
     
+    // MARK: - Inspector State
+    @State private var showInspector = true
+    
     @State var debouncedSelection: Set<String> = []
     @State var selectionDebounceTimer: Timer?
     @FocusState var isTableFocused: Bool
@@ -76,13 +79,14 @@ struct ContentView: View {
                 NavigationSplitView {
                     sidebarContent
                         .navigationSplitViewColumnWidth(min: 100, ideal:200, max:300)
-                } content: {
-                    tableView
                 } detail: {
-                    detailSplitView
-                        .navigationSplitViewColumnWidth(min: 200, ideal: 400)
+                    tableView
+                        .inspector(isPresented: $showInspector) {
+                            detailSplitView
+                        }
                 }
                 .navigationSplitViewStyle(.prominentDetail)
+                .animation(.none, value: showInspector) // Disable entire split view animation during inspector transitions
             }
         }
         .frame(minWidth: 1200, minHeight: 600)
@@ -123,6 +127,16 @@ struct ContentView: View {
 
             // RIGHT: Primary actions
             ToolbarItemGroup(placement: .primaryAction) {
+                // Inspector toggle button
+                Button {
+                    showInspector.toggle()
+                } label: {
+                    Label(showInspector ? "Hide Inspector" : "Show Inspector",
+                          systemImage: showInspector ? "sidebar.trailing" : "sidebar.right")
+                }
+                .help(showInspector ? "Hide the inspector panel" : "Show the inspector panel")
+                .keyboardShortcut("]", modifiers: [.command, .option])
+                
                 // Clear selection button
                 if !vm.selectedMatchesForDeletion.isEmpty {
                     Button {
@@ -238,7 +252,7 @@ struct ContentView: View {
     // MARK: - Table View
     // Adds compatibiilty for macOS 15.
     // Padding for the table so it doesn't go under the toolbar.
-    // Not an issue on macOS 26 liquid glass. 
+    // Not an issue on macOS 26 liquid glass.
     private var macOS15Padding: CGFloat {
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15 ? 1 : 0
     }

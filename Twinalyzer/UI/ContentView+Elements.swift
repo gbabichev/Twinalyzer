@@ -239,7 +239,7 @@ extension ContentView {
                         .font(.system(size: 32))
                         .foregroundStyle(.secondary)
                     
-                    Text("Drop parent folders here to discover image folders.")
+                    Text("Drop folders here to start!")
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     
@@ -266,7 +266,6 @@ extension ContentView {
         }
     }
     
-    // MARK: - Cross-Folder Duplicates Panel
     // MARK: - Cross-Folder Duplicates Panel
     var duplicatesFolderPanel: some View {
         let pairs = vm.orderedCrossFolderPairsStatic
@@ -365,6 +364,7 @@ extension ContentView {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+    
     // MARK: - Preview Panel
     var previewPanel: some View {
         GeometryReader { geometry in
