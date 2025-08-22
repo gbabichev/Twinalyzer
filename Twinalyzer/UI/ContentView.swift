@@ -241,12 +241,6 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - SIMPLIFIED Results Table with Native Sorting
-    /// Apply the sortOrder to get native column header sorting
-    var sortedResults: [TableRow] {
-        vm.activeSortedRows
-    }
-    
     var tableView: some View {
         let rows: [TableRow] = displayedRows
         let selection = $tableSelection
@@ -259,31 +253,6 @@ struct ContentView: View {
             .navigationTitle("Results")
             .focused($isTableFocused)
     }
-    
-    // MARK: - Preview Panel (simplified)
-//    var previewPanel: some View {
-//        GeometryReader { geometry in
-//            VStack {
-//                if let row = selectedRow, !sortedResults.isEmpty {
-//                    previewLayout(for: row, in: geometry.size)
-//                } else {
-//                    VStack(spacing: 8) {
-//                        if vm.selectedMatchesForDeletion.count > 1 {
-//                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
-//                                .foregroundStyle(.secondary)
-//                            Text("Press Delete or use toolbar button to delete selected matches")
-//                                .foregroundStyle(.secondary)
-//                                .font(.footnote)
-//                        } else {
-//                            Text(vm.comparisonResults.isEmpty ? "Run an analysis to see results here." : "Select a row to preview")
-//                                .foregroundStyle(.secondary)
-//                        }
-//                    }
-//                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-//                }
-//            }
-//        }
-//    }
     
     // MARK: - Preview Layout (simplified - no more complex display helpers)
     @ViewBuilder

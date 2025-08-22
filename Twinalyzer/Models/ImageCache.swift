@@ -27,7 +27,7 @@ private enum _ImageCacheConfig {
 /// Uses NSCache for automatic memory pressure handling and LRU eviction
 /// Configured with reasonable limits to balance performance with memory usage
 /// ENHANCED: Added memory pressure monitoring and cache size adjustment
-public final class ImageCache {
+class ImageCache {
     /// Shared cache instance accessible throughout the app
     /// NSCache is thread-safe and handles memory pressure automatically
     ///
@@ -36,9 +36,9 @@ public final class ImageCache {
         configureCacheLimits()
         setupMemoryPressureMonitoring()
     }()
-    @inline(__always) public static func ensureBootstrapped() { _ = _bootstrap }
+    @inline(__always) static func ensureBootstrapped() { _ = _bootstrap }
 
-    public static let shared = NSCache<NSString, NSImage>()
+    static let shared = NSCache<NSString, NSImage>()
     
     // MARK: - Configuration
     private static let baseCountLimit = 200                   // Base limit for cached images
@@ -101,39 +101,27 @@ public final class ImageCache {
             }
         }
     }
-    
-    /// Force cache cleanup when memory pressure is detected
-    public static func clearCacheIfNeeded() {
-        Task.detached(priority: .utility) {
-            let isHighMemory = await isMemoryPressureHigh()
-            if isHighMemory {
-                await MainActor.run {
-                    shared.removeAllObjects()
-                }
-            }
-        }
-    }
 }
 
 // MARK: - Enhanced Image Processing Utilities
 /// Static utility functions for efficient image processing and cache management
 /// All functions are nonisolated for Swift 6 concurrency safety
 /// ENHANCED: Added timeout protection, better error handling, and memory monitoring
-public enum ImageProcessingUtilities {
+enum ImageProcessingUtilities {
     
     // MARK: - Configuration
     // Keep private, but DO NOT use in a default argument (fixes the compiler error).
     private nonisolated static let processingTimeout: TimeInterval = 15.0  // 15 second timeout
     private nonisolated static let maxImageDimension: CGFloat = 8192       // Reject extremely large images
     
-    public nonisolated static func runWithQoS<T>(
+    nonisolated static func runWithQoS<T>(
             _ qos: DispatchQoS.QoSClass,
             _ work: @escaping () -> T
         ) -> T {
             DispatchQueue.global(qos: qos).sync(execute: work)
         }
 
-        public nonisolated static func downsampledCGImage(
+        nonisolated static func downsampledCGImage(
             at url: URL,
             targetMaxDimension: CGFloat,
             qos: DispatchQoS.QoSClass = .userInitiated   // <- NEW
@@ -161,7 +149,7 @@ public enum ImageProcessingUtilities {
             }
         }
 
-    public nonisolated static func downsampledCGImageWithTimeout(
+    nonisolated static func downsampledCGImageWithTimeout(
         at url: URL,
         targetMaxDimension: CGFloat,
         timeout: TimeInterval? = nil
@@ -192,63 +180,16 @@ public enum ImageProcessingUtilities {
     }
     
     // MARK: - Enhanced Cache Bucket System
-    public nonisolated static func cacheBucket(for dimension: CGFloat) -> Int {
+    nonisolated static func cacheBucket(for dimension: CGFloat) -> Int {
         return cacheBucketSync(for: dimension)
     }
     
-    public nonisolated static func cacheBucketSync(for dimension: CGFloat) -> Int {
+    nonisolated static func cacheBucketSync(for dimension: CGFloat) -> Int {
         if dimension <= 320 { return 320 }
         if dimension <= 640 { return 640 }
         if dimension <= 1024 { return 1024 }
         if dimension <= 1600 { return 1600 }
         return 2048
     }
-    
-    public nonisolated static func cacheBucketWithMemoryCheck(for dimension: CGFloat) async -> Int {
-        let isHighMemory = await isMemoryPressureHigh()
-        if isHighMemory {
-            if dimension <= 160 { return 160 }
-            if dimension <= 320 { return 320 }
-            if dimension <= 512 { return 512 }
-            return 1024
-        } else {
-            return cacheBucketSync(for: dimension)
-        }
-    }
-    
-    // MARK: - Memory Pressure Monitoring
-    /// Checks if system is under memory pressure
-    private nonisolated static func isMemoryPressureHigh() async -> Bool {
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                var info = mach_task_basic_info()
-                var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
-                let kerr = withUnsafeMutablePointer(to: &info) {
-                    $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-                        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-                    }
-                }
-                
-                if kerr == KERN_SUCCESS {
-                    let isHighMemory = info.resident_size > _ImageCacheConfig.memThreshold()
-                    continuation.resume(returning: isHighMemory)
-                } else {
-                    continuation.resume(returning: false)
-                }
-            }
-        }
-    }
-    
-    // MARK: - Cache Management Utilities
-    public static func clearCacheIfNeeded() {
-        ImageCache.clearCacheIfNeeded()
-    }
-    
-    public static func getCacheStatistics() -> (count: Int, totalCost: Int) {
-        _ = ImageCache.shared // placeholder; NSCache doesn't expose stats
-        return (count: 0, totalCost: 0)
-        // If you later track costs manually, return real values here.
-    }
-    
 }
 

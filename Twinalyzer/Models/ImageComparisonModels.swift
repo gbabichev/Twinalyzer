@@ -8,7 +8,7 @@
 import Foundation
 
 // MARK: - Analysis Configuration Models
-public enum AnalysisMode: String, CaseIterable, Identifiable, RawRepresentable {
+enum AnalysisMode: String, CaseIterable, Identifiable, RawRepresentable {
     case deepFeature = "Enhanced Scan"
     case perceptualHash = "Basic Scan"
     
@@ -31,12 +31,12 @@ public enum AnalysisMode: String, CaseIterable, Identifiable, RawRepresentable {
 }
 
 // MARK: - Hierarchical Result (unchanged)
-public struct ImageComparisonResult: Identifiable, Sendable, Equatable, Hashable {
+struct ImageComparisonResult: Identifiable, Sendable, Equatable, Hashable {
     public let id: UUID
-    public let reference: String
-    public let similars: [(path: String, percent: Double)]
+    let reference: String
+    let similars: [(path: String, percent: Double)]
     
-    public nonisolated init(reference: String, similars: [(path: String, percent: Double)]) {
+    nonisolated init(reference: String, similars: [(path: String, percent: Double)]) {
         self.id = UUID()
         self.reference = reference
         self.similars = similars

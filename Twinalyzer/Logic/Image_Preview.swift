@@ -10,7 +10,6 @@
 import SwiftUI
 import AppKit
 import ImageIO
-import Darwin.Mach
 
 // MARK: - Optimized Image Preview Component
 /// High-performance SwiftUI view for displaying image thumbnails with intelligent caching
@@ -28,8 +27,8 @@ struct PreviewImage: View {
     @State private var loadingTask: Task<Void, Never>?  // Cancellable loading task
     @State private var hasError: Bool = false     // Track if loading failed
     @State private var currentPath: String = ""   // Track current path being loaded
-    @State private var loadingDebounceTimer: Timer?
-
+    @State private var loadingDebounceTask: Task<Void, Never>?
+    
     // MARK: - Constants
     private static let loadingTimeout: TimeInterval = 10.0  // 10 second timeout for image loading
     fileprivate let MEMORY_PRESSURE_THRESHOLD: UInt64 = 512 * 1024 * 1024
@@ -40,14 +39,6 @@ struct PreviewImage: View {
         self.path = path
         self.maxDimension = maxDimension
         self.priority = .utility
-    }
-    
-    /// Priority-aware initializer for performance tuning
-    /// Use .background for small thumbnails, .userInitiated for detail views
-    init(path: String, maxDimension: CGFloat, priority: TaskPriority) {
-        self.path = path
-        self.maxDimension = maxDimension
-        self.priority = priority
     }
     
     var body: some View {
@@ -119,12 +110,6 @@ struct PreviewImage: View {
             )
     }
 
-    // MARK: - Cache Key
-    private var cacheKey: String {
-        let bucket = ImageProcessingUtilities.cacheBucket(for: maxDimension)
-        return "\(path)::\(bucket)"
-    }
-
     // MARK: - Main-actor state setters
     @MainActor private func setImage(_ img: NSImage?, forPath imagePath: String) {
         guard imagePath == self.path else { return }
@@ -148,27 +133,38 @@ struct PreviewImage: View {
     // MARK: - Loading Management
     private func startLoading() {
         guard loadingTask == nil else { return }
-        
-        // Cancel any existing debounce timer
-        loadingDebounceTimer?.invalidate()
-        
-        // Debounce rapid selection changes (50ms delay)
-        loadingDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { _ in
-            self.loadingDebounceTimer = nil
-            self.startActualLoading()
+
+        // Cancel any existing debounce
+        loadingDebounceTask?.cancel()
+
+        // Take a snapshot of the current selection BEFORE the debounce
+        let capturedPath = self.path
+
+        // Debounce ~50ms using structured concurrency
+        loadingDebounceTask = Task { [capturedPath] in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled else { return }
+
+            // Hop to the main actor to touch state / call the main-actor method
+            await MainActor.run {
+                startActualLoading(path: capturedPath)
+            }
         }
     }
 
-    private func startActualLoading() {
-        let pathToLoad = path
+    // Change signature to accept a snapshot:
+    @MainActor
+    private func startActualLoading(path: String?) {
+        guard let pathToLoad = path else { return }
         loadingTask = Task(priority: priority) {
             await load(pathToLoad)
         }
     }
 
+    // UPDATE cancelLoading() so it cancels the Task-based debounce:
     private func cancelLoading() {
-        loadingDebounceTimer?.invalidate()
-        loadingDebounceTimer = nil
+        loadingDebounceTask?.cancel()
+        loadingDebounceTask = nil
         loadingTask?.cancel()
         loadingTask = nil
     }
@@ -250,15 +246,3 @@ struct PreviewImage: View {
         }
     }
 }
-
-// MARK: - TaskPriority QoS Extension
-private extension TaskPriority {
-    var qosClass: DispatchQoS.QoSClass {
-        if self >= .high { return .userInteractive }
-        else if self >= .userInitiated { return .userInitiated }
-        else if self >= .medium { return .default }
-        else if self >= .utility { return .utility }
-        else { return .background }
-    }
-}
-

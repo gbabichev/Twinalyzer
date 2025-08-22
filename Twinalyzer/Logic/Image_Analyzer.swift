@@ -27,14 +27,13 @@ import Darwin
 /// Provides both AI-based deep feature analysis and traditional perceptual hashing
 /// All methods are nonisolated for Swift 6 concurrency safety
 /// ENHANCED: Now includes beachball prevention and memory pressure handling
-public enum ImageAnalyzer {
 
+enum ImageAnalyzer {
+    
     // MARK: - Configuration Constants
     private nonisolated static let maxBatchSize = 1000          // Limit processing to prevent memory issues
     private nonisolated static let fileSystemChunkSize = 50     // Process directories in chunks
-    private nonisolated static let comparisonYieldInterval = 250 // Yield every N comparisons
-    private nonisolated static let memoryPressureThreshold = 512 * 1024 * 1024 // 512MB
-
+    
     // MARK: - Progress Tracking Utilities
     /// Throttled progress reporting to avoid overwhelming the UI with updates
     /// Only reports progress every 5 items or at completion to maintain performance
@@ -54,24 +53,12 @@ public enum ImageAnalyzer {
         }
     }
     
-    @inline(__always)
-    private func _withQoS<T>(_ qos: qos_class_t, _ body: () -> T) -> T {
-        var oldQos: qos_class_t = QOS_CLASS_DEFAULT
-        var oldRel: Int32 = 0
-        pthread_get_qos_class_np(pthread_self(), &oldQos, &oldRel)
-        pthread_set_qos_class_self_np(qos, 0)
-        let out = body()
-        pthread_set_qos_class_self_np(oldQos, oldRel)
-        return out
-    }
-    
-
     // MARK: - Deep Feature Analysis (AI-Based)
     /// Primary analysis method using Apple's Vision framework for intelligent similarity detection
     /// Can detect similar content even with different crops, lighting, or minor modifications
     /// More computationally intensive but significantly more accurate than hash-based methods
     /// FIXED: Now only processes the exact folders passed in, no re-discovery
-    public nonisolated static func analyzeWithDeepFeatures(
+    nonisolated static func analyzeWithDeepFeatures(
         inFolders leafFolders: [URL],  // FIXED: Use exact folders from sidebar
         similarityThreshold: Double,
         topLevelOnly: Bool,
@@ -79,7 +66,7 @@ public enum ImageAnalyzer {
         progress: (@Sendable (Double) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
-    ) {
+    ){
         Task.detached(priority: .utility) {
             guard shouldCancel?() != true else {
                 await MainActor.run { completion([]) }
@@ -157,13 +144,13 @@ public enum ImageAnalyzer {
             }
         }
     }
-
+    
     // MARK: - Perceptual Hash Analysis (Fast)
     /// Alternative analysis method using perceptual hashing for fast duplicate detection
     /// Best for finding exact or near-exact duplicates with minimal computational overhead
     /// Uses block hash algorithm (8x8 grayscale grid) with Hamming distance comparison
     /// FIXED: Now only processes the exact folders passed in, no re-discovery
-    public nonisolated static func analyzeWithPerceptualHash(
+    nonisolated static func analyzeWithPerceptualHash(
         inFolders leafFolders: [URL],  // FIXED: Use exact folders from sidebar
         similarityThreshold: Double,
         topLevelOnly: Bool,
@@ -276,7 +263,7 @@ public enum ImageAnalyzer {
         // Return pairs sorted by similarity percentage (highest first)
         return allPairs.sorted { $0.percent > $1.percent }
     }
-
+    
     // MARK: - FIXED: New method that only scans exact folders (no re-discovery)
     /// Gets all image files from the exact list of folders provided
     /// This ensures consistency with what's shown in the sidebar
@@ -289,10 +276,10 @@ public enum ImageAnalyzer {
     ) async -> [URL] {
         var all: [URL] = []
         all.reserveCapacity(1024)
-
+        
         for folder in folders {
             if shouldCancel?() == true { break }
-
+            
             let files = await allImageFilesAsync(
                 in: folder,
                 ignoredFolderName: ignoredFolderName,
@@ -304,7 +291,7 @@ public enum ImageAnalyzer {
         }
         return all
     }
-
+    
     // MARK: - Rest of the implementation (unchanged methods)
     
     /// Processes a batch of images through the Vision framework pipeline
@@ -350,9 +337,9 @@ public enum ImageAnalyzer {
         }
         
         // Clustering is fast, so we do it on the main actor for thread safety
-//        return await MainActor.run {
-//            _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
-//        }
+        //        return await MainActor.run {
+        //            _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
+        //        }
         return await _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
     }
     
@@ -475,7 +462,7 @@ public enum ImageAnalyzer {
             )
         }.sorted { ($0.similars.first?.percent ?? 0) > ($1.similars.first?.percent ?? 0) }
     }
-
+    
     /// Advanced clustering algorithm for Vision framework feature vectors
     /// Groups similar images while intelligently choosing reference images
     /// Must run on MainActor due to Vision framework requirements
@@ -485,7 +472,7 @@ public enum ImageAnalyzer {
         threshold: Double
     ) -> [ImageComparisonResult] {
         precondition(observations.count == paths.count)
-
+        
         // Compute similarity between two feature vectors
         // Uses Vision's built-in distance metric converted to similarity
         @inline(__always)
@@ -498,7 +485,7 @@ public enum ImageAnalyzer {
                 return 0.0
             }
         }
-
+        
         // Choose the best reference image from a cluster
         // Prefers exact matches, then falls back to lexicographic ordering
         func chooseReference(in idxs: [Int]) -> Int {
@@ -514,7 +501,7 @@ public enum ImageAnalyzer {
             // No exact matches found, use lexicographic ordering
             return idxs.min { paths[$0] < paths[$1] }!
         }
-
+        
         // Calculate best similarity for each image in a cluster
         func bestSims(in idxs: [Int]) -> [Int: Double] {
             var best: [Int: Double] = [:]
@@ -528,18 +515,18 @@ public enum ImageAnalyzer {
             }
             return best
         }
-
+        
         let n = observations.count
         guard n > 1 else { return [] }
-
+        
         let exactEps = 0.9995
         var used = Set<Int>()
         var results: [ImageComparisonResult] = []
-
+        
         // Main clustering loop: build connected components of similar images
         for i in 0..<n {
             guard !used.contains(i) else { continue }
-
+            
             // Find all images similar to image i
             var members = [i]
             for j in (i + 1)..<n where !used.contains(j) {
@@ -550,12 +537,12 @@ public enum ImageAnalyzer {
             }
             used.insert(i)
             guard members.count > 1 else { continue }
-
+            
             // Build result structure for this cluster
             let refIdx = chooseReference(in: members)
             let refPath = paths[refIdx]
             let best = bestSims(in: members)
-
+            
             var rows: [(path: String, percent: Double)] = []
             rows.append((refPath, 1.0))
             var tail: [(path: String, percent: Double)] = []
@@ -566,53 +553,15 @@ public enum ImageAnalyzer {
             }
             tail.sort { $0.percent > $1.percent }
             rows.append(contentsOf: tail)
-
+            
             results.append(ImageComparisonResult(reference: refPath, similars: rows))
         }
         return results
     }
-
+    
     // MARK: - Enhanced File Discovery and Filtering
     
-    /// FIXED: New method that properly filters ignored folders during file discovery
-    public nonisolated static func allImageFilesWithIgnoredFilter(
-        in directory: URL,
-        ignoredFolderName: String
-    ) -> [URL] {
-        var results: [URL] = []
-        let fm = FileManager.default
-        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if let enumerator = fm.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isHiddenKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) {
-            while let element = enumerator.nextObject() {
-                guard let url = element as? URL else { continue }
-                
-                // Check if this is in an ignored folder path
-                if !ignoredName.isEmpty {
-                    let pathComponents = url.pathComponents
-                    let containsIgnoredFolder = pathComponents.contains { component in
-                        component.lowercased() == ignoredName
-                    }
-                    if containsIgnoredFolder {
-                        continue // Skip files in ignored folders
-                    }
-                }
-                
-                guard let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
-                      (rv.isRegularFile ?? false),
-                      !(rv.isHidden ?? false),
-                      allowedImageExtensions.contains(url.pathExtension.lowercased())
-                else { continue }
-                
-                results.append(url)
-            }
-        }
-        return results
-    }
+    
     
     /// ENHANCED: Async version with chunked processing and ignored folder filtering
     /// FIXED: Now respects topLevelOnly to prevent discovering new subfolders during analysis
@@ -634,7 +583,7 @@ public enum ImageAnalyzer {
         var results: [URL] = []
         let fm = FileManager.default
         let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-
+        
         if let e = fm.enumerator(
             at: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isHiddenKey],
@@ -644,10 +593,10 @@ public enum ImageAnalyzer {
             while let element = e.nextObject() {
                 if shouldCancel?() == true { break }
                 guard let url = element as? URL else { continue }
-
+                
                 count += 1
                 if count % fileSystemChunkSize == 0 { await Task.yield() }
-
+                
                 // FIXED: Check if this file is in an ignored folder path
                 if !ignoredName.isEmpty {
                     let pathComponents = url.pathComponents
@@ -658,22 +607,22 @@ public enum ImageAnalyzer {
                         continue // Skip files in ignored folders
                     }
                 }
-
+                
                 guard
                     let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey]),
                     (rv.isRegularFile ?? false),
                     !(rv.isHidden ?? false),
                     allowedImageExtensions.contains(url.pathExtension.lowercased())
                 else { continue }
-
+                
                 results.append(url)
             }
         }
         return results
     }
-
+    
     /// FIXED: New method that properly filters ignored subfolders during top-level scanning
-    public nonisolated static func topLevelImageFilesWithIgnoredFilter(
+    nonisolated static func topLevelImageFilesWithIgnoredFilter(
         in directory: URL,
         ignoredFolderName: String
     ) -> [URL] {
@@ -697,7 +646,7 @@ public enum ImageAnalyzer {
             }
             
             if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true &&
-               allowedImageExtensions.contains(url.pathExtension.lowercased()) {
+                allowedImageExtensions.contains(url.pathExtension.lowercased()) {
                 results.append(url)
             }
         }
@@ -714,18 +663,18 @@ public enum ImageAnalyzer {
         
         return topLevelImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: ignoredFolderName)
     }
-
+    
     /// Comprehensive list of supported image file extensions
     /// Includes common formats (JPEG, PNG) and professional formats (RAW, HEIC)
     private nonisolated static let allowedImageExtensions: Set<String> = [
         "jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"
     ]
-
+    
     // MARK: - Perceptual Hash Implementation
     /// Generates a 64-bit perceptual hash using block hash algorithm
     /// Converts image to 8x8 grayscale grid and compares pixels to average brightness
     /// Robust to minor changes in compression, scaling, and lighting
-    public nonisolated static func blockHash(for cgImage: CGImage) -> UInt64? {
+    nonisolated static func blockHash(for cgImage: CGImage) -> UInt64? {
         let w = 8, h = 8
         guard let ctx = CGContext(
             data: nil,
@@ -752,10 +701,10 @@ public enum ImageAnalyzer {
         for i in 0..<(w*h) { if p[i] >= avg { hash |= (1 << UInt64(i)) } }
         return hash
     }
-
+    
     /// Convenience method to generate perceptual hash directly from image file
     /// Handles downsampling for consistent hash generation
-    public nonisolated static func blockHash(for imageURL: URL) async -> UInt64? {
+    nonisolated static func blockHash(for imageURL: URL) async -> UInt64? {
         let cg = await ImageProcessingUtilities.downsampledCGImageWithTimeout(
             at: imageURL,
             targetMaxDimension: 32,
@@ -764,62 +713,13 @@ public enum ImageAnalyzer {
         guard let cg else { return nil }
         return blockHash(for: cg)
     }
-
+    
     /// Calculates Hamming distance between two hash values
     /// Counts the number of differing bits using XOR and bit counting
-    public nonisolated static func hammingDistance(_ a: UInt64, _ b: UInt64) -> Int {
+    nonisolated static func hammingDistance(_ a: UInt64, _ b: UInt64) -> Int {
         Int((a ^ b).nonzeroBitCount)
     }
 
-    // MARK: - Enhanced Image Processing Utilities
-    /// Creates a downsampled CGImage from a file URL for consistent processing
-    /// Uses ImageIO for efficient thumbnail generation with orientation handling
-    /// Essential for memory management when processing large image collections
-    /// ENHANCED: Added error handling and timeout protection
-    public nonisolated static func downsampledCGImage(from url: URL, to size: CGSize) async -> CGImage? {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                autoreleasepool {
-                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-                        continuation.resume(returning: nil)
-                        return
-                    }
-                    let maxDimension = Int(max(size.width, size.height))
-                    let opts: [CFString: Any] = [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceShouldCache: false,
-                        kCGImageSourceShouldCacheImmediately: false,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: maxDimension
-                    ]
-                    let img = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
-                    continuation.resume(returning: img)
-                }
-            }
-        }
-    }
-    
-    public nonisolated static func downsampledCGImageAsync(from url: URL, to size: CGSize) async -> CGImage? {
-        await withCheckedContinuation { cont in
-            // Run the ImageIO decode off the main thread at a matching QoS
-            DispatchQueue.global(qos: .userInitiated).async {
-                let img: CGImage? = autoreleasepool {
-                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-                    let maxDimension = Int(max(size.width, size.height))
-                    let opts: [CFString: Any] = [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceShouldCache: false,
-                        kCGImageSourceShouldCacheImmediately: false,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: maxDimension
-                    ]
-                    return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
-                }
-                cont.resume(returning: img)
-            }
-        }
-    }
-    
     // MARK: - Memory Pressure Monitoring
     /// Checks if system is under memory pressure
     /// Returns true if available memory is low or if resident memory exceeds threshold
@@ -844,99 +744,4 @@ public enum ImageAnalyzer {
             }
         }
     }
-
-    // MARK: - Legacy methods for backward compatibility (NOT USED in new flow)
-    /// These methods are kept for potential future use but are NOT used in the main analysis flow
-    /// The new flow only processes exact folders passed from the sidebar
-    
-    /// Legacy method - not used in new flow
-    public nonisolated static func foldersToScan(from roots: [URL]) -> [URL] {
-        var out: [URL] = []
-        out.reserveCapacity(roots.count * 4)
-
-        for root in roots {
-            let subs = recursiveSubdirectoriesExcludingRoots(under: [root])
-            if subs.isEmpty {
-                out.append(root)
-            } else {
-                out.append(contentsOf: subs)
-            }
-        }
-
-        var seen = Set<URL>()
-        return out.filter { seen.insert($0.standardizedFileURL).inserted }
-    }
-    
-    /// Legacy method - not used in new flow
-    public nonisolated static func recursiveSubdirectoriesExcludingRootsAndIgnored(
-        under roots: [URL],
-        ignoredFolderName: String = ""
-    ) -> [URL] {
-        let fm = FileManager.default
-        var dirs: [URL] = []
-        dirs.reserveCapacity(256)
-        
-        let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        for root in roots {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
-            if let enumerator = fm.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) {
-                while let element = enumerator.nextObject() {
-                    guard let url = element as? URL else { continue }
-                    if let r = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
-                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
-                        
-                        let folderName = url.lastPathComponent.lowercased()
-                        if !ignoredName.isEmpty && folderName == ignoredName {
-                            continue
-                        }
-                        
-                        dirs.append(url)
-                    }
-                }
-            }
-        }
-        return dirs
-    }
-    
-    /// Legacy method - not used in new flow
-    public nonisolated static func recursiveSubdirectoriesExcludingRoots(under roots: [URL]) -> [URL] {
-        let fm = FileManager.default
-        var dirs: [URL] = []
-        dirs.reserveCapacity(256)
-        for root in roots {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
-            if let enumerator = fm.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) {
-                while let element = enumerator.nextObject() {
-                    guard let url = element as? URL else { continue }
-                    if let r = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
-                       (r.isDirectory ?? false), !(r.isHidden ?? false) {
-                        dirs.append(url)
-                    }
-                }
-            }
-        }
-        return dirs
-    }
-    
-    /// Legacy method - not used in new flow
-    public nonisolated static func allImageFiles(in directory: URL) -> [URL] {
-        return allImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: "")
-    }
-    
-    /// Legacy method - not used in new flow
-    public nonisolated static func topLevelImageFiles(in directory: URL) -> [URL] {
-        return topLevelImageFilesWithIgnoredFilter(in: directory, ignoredFolderName: "")
-    }
 }
-

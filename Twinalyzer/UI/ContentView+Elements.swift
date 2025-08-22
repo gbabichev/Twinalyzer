@@ -281,51 +281,6 @@ extension ContentView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-
-    // Add this helper method to ContentView+Elements.swift:
-    private func folderRowStatic(folder: String) -> some View {
-        Button(action: { vm.openFolderInFinder(folder) }) {
-            HStack(alignment: .center, spacing: 8) {
-                // Use cached display name instead of computing in view
-                let displayName = vm.folderDisplayNamesStatic[folder] ?? folder
-                
-                // Folder name with middle truncation for long paths
-                Text(displayName)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                
-                Spacer(minLength: 0)
-                
-                HStack(spacing: 6) {
-                    // Representative thumbnail from static data
-//                    if let imagePath = vm.representativeImageByFolderStatic[folder] {
-//                        PreviewImage(path: imagePath, maxDimension: 24)
-//                            .frame(width: 24, height: 24)
-//                            .clipped()
-//                            .cornerRadius(3)
-//                            .overlay(
-//                                RoundedRectangle(cornerRadius: 3)
-//                                    .stroke(Color.gray.opacity(0.25), lineWidth: 1)
-//                            )
-//                    }
-                    
-                    // Duplicate count badge from static data
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("\(vm.crossFolderDuplicateCountsStatic[folder, default: 0])")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text("dupes")
-                            .font(.system(size: 8))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .buttonStyle(.plain)
-        .help("Folder: \(folder)")
-    }
     
     // MARK: - Preview Panel (unchanged)
     var previewPanel: some View { /* unchanged from your latest file */
@@ -450,10 +405,3 @@ extension ContentView {
         }
     }
 }
-    
-// MARK: - Content Size Preference Key
-struct ContentSizePreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-

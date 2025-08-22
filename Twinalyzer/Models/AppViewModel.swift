@@ -70,7 +70,6 @@ final class AppViewModel: ObservableObject {
     
     // MARK: - Configuration Constants
     private nonisolated static let maxDiscoveryBatchSize = 2000
-    private nonisolated static let discoveryChunkSize = 100
     private nonisolated static let progressUpdateThrottle = 0.1
     
     // MARK: - Core Published State
@@ -99,10 +98,7 @@ final class AppViewModel: ObservableObject {
     
     // MARK: - Performance Cache Storage (ephemeral / derived)
     private var _flattenedResultsCache: [TableRow]?
-    private var _folderDuplicateCountsCache: [String: Int]?
-    private var _representativeImageByFolderCache: [String: String]?
     private var _folderClustersCache: [[String]]?
-    private var _crossFolderDuplicateCountsCache: [String: Int]?
     private var _flattenedResultsSortedCache: [TableRow]?
     private var _sortedResultsCache: [String: [TableRow]] = [:]
     
@@ -115,9 +111,7 @@ final class AppViewModel: ObservableObject {
     var activeLeafFolders: [URL] {
         discoveredLeafFolders.filter { !excludedLeafFolders.contains($0) }
     }
-    var foldersToScanLabel: String {
-        activeLeafFolders.map { $0.lastPathComponent }.joined(separator: "\n")
-    }
+
     var isAnyOperationRunning: Bool { isProcessing || isDiscoveringFolders }
     var allFoldersBeingProcessed: [URL] {
         if isDiscoveringFolders {
@@ -152,34 +146,7 @@ final class AppViewModel: ObservableObject {
         _flattenedResultsCache = result
         return result
     }
-    var folderDuplicateCounts: [String: Int] {
-        if let cached = _folderDuplicateCountsCache { return cached }
-        var counts: [String: Int] = [:]
-        for result in comparisonResults {
-            let allPaths = [result.reference] + result.similars.map { $0.path }
-            for path in allPaths {
-                let folder = URL(fileURLWithPath: path).deletingLastPathComponent().path
-                counts[folder, default: 0] += 1
-            }
-        }
-        _folderDuplicateCountsCache = counts
-        return counts
-    }
-    var representativeImageByFolder: [String: String] {
-        if let cached = _representativeImageByFolderCache { return cached }
-        var representatives: [String: String] = [:]
-        for result in comparisonResults {
-            let allPaths = [result.reference] + result.similars.map { $0.path }
-            for path in allPaths {
-                let folder = URL(fileURLWithPath: path).deletingLastPathComponent().path
-                if representatives[folder] == nil {
-                    representatives[folder] = path
-                }
-            }
-        }
-        _representativeImageByFolderCache = representatives
-        return representatives
-    }
+
     var folderClusters: [[String]] {
         if let cached = _folderClustersCache { return cached }
         var folderPairs: Set<[String]> = []
@@ -194,19 +161,7 @@ final class AppViewModel: ObservableObject {
         _folderClustersCache = result
         return result
     }
-    var crossFolderDuplicateCounts: [String: Int] {
-        if let cached = _crossFolderDuplicateCountsCache { return cached }
-        var counts: [String: Int] = [:]
-        for row in flattenedResults {
-            let ref = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-            let match = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-            guard ref != match else { continue }
-            counts[ref, default: 0] += 1
-            counts[match, default: 0] += 1
-        }
-        _crossFolderDuplicateCountsCache = counts
-        return counts
-    }
+
     var flattenedResultsSorted: [TableRow] {
         if let cached = _flattenedResultsSortedCache { return cached }
         let result = flattenedResults.sorted { $0.percent > $1.percent }
@@ -229,24 +184,9 @@ final class AppViewModel: ObservableObject {
         }.joined(separator: "|")
     }
 
-    func getSortedRows(using sortOrder: [KeyPathComparator<TableRow>]) -> [TableRow] {
-        let cacheKey = sortCacheKey(for: sortOrder)
-        if let cached = _sortedResultsCache[cacheKey] { return cached }
-        let sorted: [TableRow]
-        if sortOrder.isEmpty {
-            sorted = flattenedResults
-        } else {
-            sorted = flattenedResults.sorted(using: sortOrder)
-        }
-        _sortedResultsCache[cacheKey] = sorted
-        return sorted
-    }
     private func invalidateAllCaches() {
         _flattenedResultsCache = nil
-        _folderDuplicateCountsCache = nil
-        _representativeImageByFolderCache = nil
         _folderClustersCache = nil
-        _crossFolderDuplicateCountsCache = nil
         _flattenedResultsSortedCache = nil
         _sortedResultsCache.removeAll()
     }
@@ -799,41 +739,3 @@ final class AppViewModel: ObservableObject {
     }
 }
 
-// MARK: - Simplified TableRow with Native Sorting Support
-/// Simplified table row that works perfectly with SwiftUI's native Table sorting
-/// All computed properties are lightweight and work great with KeyPath-based sorting
-public struct TableRow: Identifiable, Hashable {
-    public let id: String
-    let reference: String
-    let similar: String
-    let percent: Double
-    let isCrossFolder: Bool
-
-    // Cached short strings (computed once to keep sorting cheap)
-    let referenceShort: String
-    let similarShort: String
-    // Lowercased caches in case you later need case-insensitive compares
-    let referenceShortLower: String
-    let similarShortLower: String
-
-    var crossFolderText: String { isCrossFolder ? "YES" : "" }
-    var percentDisplay: String {
-        let clamped = max(0.0, min(1.0, percent))
-        return String(format: "%.1f%%", clamped * 100)
-    }
-    init(id: String, reference: String, similar: String, percent: Double, isCrossFolder: Bool) {
-        self.id = id
-        self.reference = reference
-        self.similar = similar
-        self.percent = percent
-        self.isCrossFolder = isCrossFolder
-
-        // Compute short strings ONCE (avoid recomputation during sort)
-        let refShort = DisplayHelpers.shortDisplayPath(for: reference)
-        let simShort = DisplayHelpers.shortDisplayPath(for: similar)
-        self.referenceShort = refShort
-        self.similarShort = simShort
-        self.referenceShortLower = refShort.lowercased()
-        self.similarShortLower = simShort.lowercased()
-    }
-}

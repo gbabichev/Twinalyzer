@@ -17,12 +17,12 @@ import Foundation
 /// Static helper functions for formatting and displaying various UI elements
 /// These utilities handle path formatting, progress display, and visual distinction
 /// of cross-folder duplicates throughout the app
-public enum DisplayHelpers {
+enum DisplayHelpers {
     
     /// Returns a shortened path showing only the last two components
     /// Example: "/Users/john/Photos/Vacation/beach.jpg" becomes "Vacation/beach.jpg"
     /// This keeps file paths readable in table cells and UI labels while maintaining context
-    public static func shortDisplayPath(for fullPath: String) -> String {
+    static func shortDisplayPath(for fullPath: String) -> String {
         let url = URL(fileURLWithPath: fullPath)
         let components = url.pathComponents
         if components.count >= 2 {
@@ -35,14 +35,14 @@ public enum DisplayHelpers {
     /// Formats a similarity threshold as a percentage label
     /// Converts decimal values (0.0-1.0) to user-friendly percentage strings
     /// Example: 0.75 becomes "75%"
-    public static func formatSimilarityThreshold(_ value: Double) -> String {
+    static func formatSimilarityThreshold(_ value: Double) -> String {
         "\(Int(round(value * 100)))%"
     }
     
     /// Determines if a table row represents a cross-folder match
     /// Cross-folder matches are visually highlighted in red throughout the UI
     /// This helps users identify duplicates that span different directories
-    public static func isCrossFolder(_ row: TableRow) -> Bool {
+    static func isCrossFolder(_ row: TableRow) -> Bool {
         let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
         let simFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
         return refFolder != simFolder
@@ -51,7 +51,7 @@ public enum DisplayHelpers {
     /// Formats a folder path for display, showing parent/folder structure
     /// Creates a hierarchical display like "Photos/Vacation" for better folder identification
     /// Falls back to just the folder name if no parent context is available
-    public static func formatFolderDisplayName(for url: URL) -> String {
+    static func formatFolderDisplayName(for url: URL) -> String {
         let folderName = url.lastPathComponent
         let parentName = url.deletingLastPathComponent().lastPathComponent
         
@@ -66,7 +66,7 @@ public enum DisplayHelpers {
     /// Creates a summary string for processing progress
     /// Handles both determinate progress (with percentage) and indeterminate states
     /// Used in the processing overlay to show analysis status
-    public static func formatProcessingProgress(_ progress: Double?) -> String {
+    static func formatProcessingProgress(_ progress: Double?) -> String {
         if let progress = progress {
             return "\(Int(progress * 100))%"
         } else {
@@ -74,6 +74,7 @@ public enum DisplayHelpers {
         }
     }
 }
+
 
 // MARK: - ContentView Helper Extensions
 extension ContentView {
@@ -135,5 +136,43 @@ extension ContentView {
         } else {
             isScrolledToBottom = true // Non-scrollable content is considered "at bottom"
         }
+    }
+}
+// MARK: - Simplified TableRow with Native Sorting Support
+/// Simplified table row that works perfectly with SwiftUI's native Table sorting
+/// All computed properties are lightweight and work great with KeyPath-based sorting
+struct TableRow: Identifiable, Hashable {
+    public let id: String
+    let reference: String
+    let similar: String
+    let percent: Double
+    let isCrossFolder: Bool
+
+    // Cached short strings (computed once to keep sorting cheap)
+    let referenceShort: String
+    let similarShort: String
+    // Lowercased caches in case you later need case-insensitive compares
+    let referenceShortLower: String
+    let similarShortLower: String
+
+    var crossFolderText: String { isCrossFolder ? "YES" : "" }
+    var percentDisplay: String {
+        let clamped = max(0.0, min(1.0, percent))
+        return String(format: "%.1f%%", clamped * 100)
+    }
+    init(id: String, reference: String, similar: String, percent: Double, isCrossFolder: Bool) {
+        self.id = id
+        self.reference = reference
+        self.similar = similar
+        self.percent = percent
+        self.isCrossFolder = isCrossFolder
+
+        // Compute short strings ONCE (avoid recomputation during sort)
+        let refShort = DisplayHelpers.shortDisplayPath(for: reference)
+        let simShort = DisplayHelpers.shortDisplayPath(for: similar)
+        self.referenceShort = refShort
+        self.similarShort = simShort
+        self.referenceShortLower = refShort.lowercased()
+        self.similarShortLower = simShort.lowercased()
     }
 }
