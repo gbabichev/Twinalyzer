@@ -1,7 +1,9 @@
 /*
  
- ContentView.swift - Updated for Simplified Table
+ ContentView.swift - Streamlined
  Twinalyzer
+ 
+ George Babichev
  
  */
 
@@ -12,23 +14,14 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     
-    
-    
-    // Constants
+    // Constants for processing view
     let columnWidth: CGFloat = 1000
     let viewportHeight: CGFloat = 200
     
     @State var atBottom = false
     @State var atTop = true
-
     
-    
-    
-    
-    
-    
-    
-    // MARK: - Scroll State Management
+    // MARK: - Core State
     @EnvironmentObject var vm: AppViewModel
     @State var showSettingsPopover = false
     
@@ -36,54 +29,41 @@ struct ContentView: View {
     @State var selectionDebounceTimer: Timer?
     @FocusState var isTableFocused: Bool
 
-    // MARK: - SIMPLIFIED Selection State Management
-    // Just one selection system now - table selection for navigation/preview
+    // MARK: - Table State
     @State var tableSelection: Set<String> = []
-    // MARK: - SIMPLIFIED Table Sorting - Let SwiftUI handle it!
-    typealias RowComparator = KeyPathComparator<TableRow>
-    @State var sortOrder: [RowComparator] = []
-    // View-only sorted copy; keep model data untouched
-    @State private var displayedRows: [TableRow] = []
-    // Off-main sort task so header clicks don't block the UI
-    @State private var sortTask: Task<Void, Never>? = nil
-    // Force table rebuild on resort to avoid diffing huge arrays
-    @State private var tableReloadToken: Int = 0
+    @State var sortOrder: [KeyPathComparator<TableRow>] = []
     
-    // Rows actually rendered by the Table (sorted view of vm.flattenedResults)
+    // MARK: - Computed Properties
+    /// Returns the currently displayed and sorted rows
+    var displayedRows: [TableRow] {
+        vm.activeSortedRows
+    }
     
-    /// SIMPLIFIED: Get the currently selected row for preview
+    /// Returns the currently selected row for preview
     var selectedRow: TableRow? {
         guard let firstID = debouncedSelection.first else { return nil }
-        return vm.flattenedResults.first(where: { $0.id == firstID })
-    }
-
-    private func recomputeDisplayedRows() {
-        let base = vm.flattenedResults
-        let order = sortOrder
-
-        // Cancel any in-flight sort on rapid header clicks
-        sortTask?.cancel()
-        sortTask = Task.detached(priority: .userInitiated) {
-            let result: [TableRow]
-            if order.isEmpty {
-                result = base
-            } else {
-                result = base.sorted(using: order)
-            }
-            await MainActor.run {
-                self.displayedRows = result
-                self.tableReloadToken &+= 1
-            }
-        }
+        return displayedRows.first(where: { $0.id == firstID })
     }
     
-    // Debounced selection change handler
+    // MARK: - Helper Methods
     private func handleSelectionChange() {
         selectionDebounceTimer?.invalidate()
         selectionDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { _ in
             DispatchQueue.main.async {
                 self.debouncedSelection = self.tableSelection
             }
+        }
+    }
+    
+    private func handleSortOrderChange() {
+        vm.updateDisplayedRows(sortOrder: sortOrder)
+    }
+    
+    private func toggleRowDeletion(_ rowID: String) {
+        if vm.selectedMatchesForDeletion.contains(rowID) {
+            vm.selectedMatchesForDeletion.remove(rowID)
+        } else {
+            vm.selectedMatchesForDeletion.insert(rowID)
         }
     }
     
@@ -98,22 +78,15 @@ struct ContentView: View {
                         .navigationSplitViewColumnWidth(min: 100, ideal:200, max:300)
                 } content: {
                     tableView
-                        .navigationSplitViewColumnWidth(min: 500, ideal: 600) // Wider for new column
+                        .navigationSplitViewColumnWidth(min: 500, ideal: 600)
                 } detail: {
                     detailSplitView
                         .navigationSplitViewColumnWidth(min: 200, ideal: 400)
                 }
                 .navigationSplitViewStyle(.prominentDetail)
-                .onAppear { recomputeDisplayedRows() }
-                .onChange(of: sortOrder) { _, _ in
-                    recomputeDisplayedRows()
-                }
-                .onChange(of: vm.flattenedResults) { _, _ in
-                    recomputeDisplayedRows()
-                }
             }
         }
-        .frame(minWidth: 1200, minHeight: 600) // Slightly wider for new column
+        .frame(minWidth: 1200, minHeight: 600)
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
@@ -205,11 +178,9 @@ struct ContentView: View {
         // MARK: - Keyboard Shortcuts
         .onKeyPress(.space) {
             guard !tableSelection.isEmpty else { return .handled }
-            
             DispatchQueue.main.async {
                 vm.toggleSelection(for: tableSelection)
             }
-            
             return .handled
         }
         // MARK: - Drag and Drop Support
@@ -238,8 +209,21 @@ struct ContentView: View {
             
             return true
         }
+        // MARK: - Change Handlers
         .onChange(of: tableSelection) { _, _ in
             handleSelectionChange()
+        }
+        .onChange(of: sortOrder) { _, _ in
+            handleSortOrderChange()
+        }
+        .onChange(of: vm.comparisonResults) { _, _ in
+            // Reset sort when new results arrive
+            sortOrder = []
+            vm.updateDisplayedRows(sortOrder: [])
+        }
+        .onAppear {
+            // Initialize display on first load
+            vm.updateDisplayedRows(sortOrder: sortOrder)
         }
         .fileExporter(
             isPresented: $vm.isExportingCSV,
@@ -251,20 +235,62 @@ struct ContentView: View {
         }
     }
     
+    // MARK: - Table View
     var tableView: some View {
-        let rows: [TableRow] = displayedRows
-        let selection = $tableSelection
-        let order = $sortOrder
-        return ResultsTable(rows: rows, selection: selection, sortOrder: order)
-            .environmentObject(vm)
-            .id(tableReloadToken)
-            .tableStyle(.automatic)
-            .transaction { $0.disablesAnimations = true }
-            .navigationTitle("Results")
-            .focused($isTableFocused)
+        Table(displayedRows, selection: $tableSelection, sortOrder: $sortOrder) {
+            
+            // Reference column with deletion checkbox
+            TableColumn("Reference", value: \.referenceShortLower) { row in
+                HStack(spacing: 8) {
+                    // Deletion checkbox
+                    Button(action: { toggleRowDeletion(row.id) }) {
+                        Image(systemName: vm.selectedMatchesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
+                            .foregroundColor(vm.selectedMatchesForDeletion.contains(row.id) ? .blue : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 20)
+                    
+                    // Reference path
+                    Text(row.referenceShort)
+                        .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .width(min: 200, ideal: 250)
+            
+            // Match column
+            TableColumn("Match", value: \.similarShortLower) { row in
+                Text(row.similarShort)
+                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .width(min: 200, ideal: 250)
+            
+            // Cross-folder indicator column
+            TableColumn("Cross-Folder", value: \.crossFolderText) { row in
+                Text(row.crossFolderText)
+                    .foregroundStyle(row.isCrossFolder ? .red : .secondary)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .width(90)
+            
+            // Similarity percentage column
+            TableColumn("Similarity", value: \.percent) { row in
+                Text(row.percentDisplay)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .width(80)
+        }
+        .tableStyle(.automatic)
+        .navigationTitle("Results (\(displayedRows.count))")
+        .focused($isTableFocused)
+        .id(vm.tableReloadToken)  // Force reload on sort changes
+        .transaction { $0.disablesAnimations = true }  // Prevent sort animations
     }
     
-    // MARK: - Preview Layout (simplified - no more complex display helpers)
+    // MARK: - Preview Layout
     @ViewBuilder
     func renderPreview(for row: TableRow, size: CGSize) -> some View {
         // Calculate layout dimensions based on available space
@@ -274,11 +300,6 @@ struct ContentView: View {
         let singleColumn = twoColumnWidth / 2
         let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
         
-        // Pre-compute paths to avoid URL processing during render
-        let refDisplayPath = DisplayHelpers.shortDisplayPath(for: row.reference)
-        let simDisplayPath = DisplayHelpers.shortDisplayPath(for: row.similar)
-        let isCrossFolder = DisplayHelpers.isCrossFolder(row)
-        
         HStack(alignment: .top, spacing: spacing) {
             // Left side: Reference image
             VStack(spacing: 8) {
@@ -286,7 +307,7 @@ struct ContentView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                Text(refDisplayPath)
+                Text(row.referenceShort)
                     .font(.caption)
                     .lineLimit(2)
                     .truncationMode(.middle)
@@ -310,12 +331,12 @@ struct ContentView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                Text(simDisplayPath)
+                Text(row.similarShort)
                     .font(.caption)
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(isCrossFolder ? .red : .primary)
+                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
                 
                 PreviewImage(path: row.similar, maxDimension: maxDim)
                     .frame(maxWidth: maxDim, maxHeight: maxDim)
@@ -331,65 +352,5 @@ struct ContentView: View {
         }
         .padding(inset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    }
-
-}
-
-struct ResultsTable: View {
-    let rows: [TableRow]
-    @Binding var selection: Set<String>
-    @Binding var sortOrder: [KeyPathComparator<TableRow>]
-    @EnvironmentObject var vm: AppViewModel
-
-    var body: some View {
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
-            // Reference column with deletion checkbox
-            TableColumn("Reference", value: \.referenceShortLower) { row in
-                HStack(spacing: 8) {
-                    Button(action: {
-                        if vm.selectedMatchesForDeletion.contains(row.id) {
-                            vm.selectedMatchesForDeletion.remove(row.id)
-                        } else {
-                            vm.selectedMatchesForDeletion.insert(row.id)
-                        }
-                    }) {
-                        Image(systemName: vm.selectedMatchesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
-                            .foregroundColor(vm.selectedMatchesForDeletion.contains(row.id) ? .blue : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 20)
-
-                    Text(row.referenceShort)
-                        .foregroundStyle(row.isCrossFolder ? .red : .primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .width(min: 200, ideal: 250)
-
-            // Match column
-            TableColumn("Match", value: \.similarShortLower) { row in
-                Text(row.similarShort)
-                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .width(min: 200, ideal: 250)
-
-            // Cross-folder column
-            TableColumn("Cross-Folder", value: \.crossFolderText) { row in
-                Text(row.crossFolderText)
-                    .foregroundStyle(row.isCrossFolder ? .red : .secondary)
-                    .font(.system(.body, design: .monospaced))
-            }
-            .width(90)
-
-            // Similarity percentage column
-            TableColumn("Similarity", value: \.percent) { row in
-                Text(row.percentDisplay)
-                    .font(.system(.body, design: .monospaced))
-            }
-            .width(80)
-        }
     }
 }

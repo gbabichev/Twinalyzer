@@ -1,6 +1,6 @@
 /*
 
- ContentView+Elements.swift
+ ContentView+Elements.swift - Streamlined
  Twinalyzer
 
  George Babichev
@@ -10,14 +10,9 @@
 import SwiftUI
 import AppKit
 
-
-
-
-
 extension ContentView {
     
     // MARK: - Processing View
-
     var processingView: some View {
         VStack(spacing: 16) {
             if vm.isDiscoveringFolders {
@@ -42,7 +37,6 @@ extension ContentView {
             processingFolderList
                 .frame(width: columnWidth)
         }
-        // Dead center in the window
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
@@ -87,7 +81,7 @@ extension ContentView {
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
-                                        .frame(maxWidth: .infinity, alignment: .center) // centered rows
+                                        .frame(maxWidth: .infinity, alignment: .center)
                                 }
 
                                 // Bottom sentinel flips atBottom at end
@@ -114,17 +108,18 @@ extension ContentView {
                             .buttonStyle(.plain)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .center) // center whole block
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
         }
     }
     
     // MARK: - Settings Panel
-    var settingsPanelPopover: some View { /* unchanged */
+    var settingsPanelPopover: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Settings").font(.headline)
             Divider()
+            
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Ignored Folder Name").font(.subheadline)
@@ -148,8 +143,10 @@ extension ContentView {
                     }
                 }
             }
+            
             Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
             Divider()
+            
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Analysis Method").font(.subheadline)
@@ -169,6 +166,7 @@ extension ContentView {
                 }
                 .pickerStyle(.segmented)
             }
+            
             VStack {
                 Text("Similarity Threshold")
                 Slider(
@@ -187,12 +185,10 @@ extension ContentView {
         .padding(20)
     }
     
-    // MARK: - Sidebar Content & Table View & Detail Split View
+    // MARK: - Sidebar Content
     var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Show folders if any have been discovered
             if !vm.discoveredLeafFolders.isEmpty {
-                
                 List {
                     HStack {
                         Image(systemName: "folder.fill")
@@ -201,22 +197,16 @@ extension ContentView {
                         
                         Text("Selected Folders")
                             .font(.title3)
-                        
                     }
 
                     Divider()
                     ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
-
                         HStack {
-                            // Folder info: folder name and parent/folder structure
                             VStack(alignment: .leading, spacing: 2) {
-                                
-                                // PRIMARY: Just the folder name
                                 Text(leafURL.lastPathComponent)
                                     .font(.body)
                                     .lineLimit(1)
                                 
-                                // SECONDARY: Parent/folder structure (smaller, gray)
                                 Text(DisplayHelpers.formatFolderDisplayName(for: leafURL))
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
@@ -227,7 +217,6 @@ extension ContentView {
                             
                             Spacer(minLength: 4)
                             
-                            // Remove folder button (hidden during processing)
                             if !vm.isProcessing {
                                 Button {
                                     vm.removeLeafFolder(leafURL)
@@ -245,7 +234,6 @@ extension ContentView {
                 }
                 .listStyle(.sidebar)
             } else {
-                // Empty state: prompt user to add folders
                 VStack(spacing: 12) {
                     Image(systemName: "folder.badge.plus")
                         .font(.system(size: 32))
@@ -268,7 +256,6 @@ extension ContentView {
     }
     
     // MARK: - Detail Split View
-    /// Right panel with vertical split: cross-folder duplicates on top, preview on bottom
     var detailSplitView: some View {
         VSplitView {
             duplicatesFolderPanel
@@ -280,25 +267,17 @@ extension ContentView {
     }
     
     // MARK: - Cross-Folder Duplicates Panel
-    private struct FolderPair: Hashable {
-        let a: String
-        let b: String
-    }
-    
     var duplicatesFolderPanel: some View {
-        // Convert your pair-style clusters [[String]] into stable, hashable rows
-        let pairs: [FolderPair] = vm.folderClusters.compactMap { cluster in
-            guard cluster.count == 2 else { return nil }
-            return FolderPair(a: cluster[0], b: cluster[1])
-        }
-
+        // Use the static snapshot from AppViewModel
+        let clusters = vm.folderClustersStatic
+        
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Cross-Folder Duplicates")
                     .font(.headline).fontWeight(.semibold)
                 Spacer()
-                if !pairs.isEmpty {
-                    Text("\(pairs.count) relationship\(pairs.count == 1 ? "" : "s")")
+                if !clusters.isEmpty {
+                    Text("\(clusters.count) relationship\(clusters.count == 1 ? "" : "s")")
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 }
@@ -306,7 +285,7 @@ extension ContentView {
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
-            if pairs.isEmpty {
+            if clusters.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "folder.badge.questionmark")
                         .font(.system(size: 24))
@@ -322,30 +301,29 @@ extension ContentView {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                // Text-only, fully lazy, no sections
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(pairs, id: \.self) { p in
-                            // Two-line compact row: Matched\nReference
+                        ForEach(Array(clusters.enumerated()), id: \.offset) { index, cluster in
+                            // Two-line compact row
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: p.a)))
+                                Text(vm.folderDisplayNamesStatic[cluster[0]] ?? cluster[0])
                                     .font(.system(size: 13, weight: .medium))
                                     .lineLimit(1)
                                     .truncationMode(.middle)
-                                Text(DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: p.b)))
+                                Text(vm.folderDisplayNamesStatic[cluster[1]] ?? cluster[1])
                                     .font(.system(size: 12))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                             }
-                            .contentShape(Rectangle()) // for future click support without Button
+                            .contentShape(Rectangle())
                             .padding(.vertical, 2)
                         }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
-                .transaction { $0.disablesAnimations = true } // eliminate subtle anim hitches
+                .transaction { $0.disablesAnimations = true }
             }
 
             Spacer(minLength: 0)
@@ -353,12 +331,13 @@ extension ContentView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Images Preview Panel
-    var previewPanel: some View { /* unchanged from your latest file */
+    // MARK: - Preview Panel
+    var previewPanel: some View {
         GeometryReader { geometry in
             VStack {
-                if let row = selectedRow, !vm.flattenedResults.isEmpty {
-                    renderPreview(for: row, size: geometry.size)                } else {
+                if let row = selectedRow, !vm.tableRows.isEmpty {
+                    renderPreview(for: row, size: geometry.size)
+                } else {
                     VStack(spacing: 8) {
                         if vm.selectedMatchesForDeletion.count > 1 {
                             Text("\(vm.selectedMatchesForDeletion.count) matches selected")
@@ -376,7 +355,4 @@ extension ContentView {
             }
         }
     }
-    
-    // MARK: - Results Table
-
 }

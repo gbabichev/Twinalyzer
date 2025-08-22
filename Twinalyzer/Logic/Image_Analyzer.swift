@@ -424,17 +424,16 @@ enum ImageAnalyzer {
                     let similarity = 1.0 - (Double(distance) / 64.0)
                     let refPath = hashes[i].path
                     let simPath = hashes[j].path
-                    let id = "\(refPath)::\(simPath)"
-                    let refFolder = URL(fileURLWithPath: refPath).deletingLastPathComponent().path
-                    let simFolder = URL(fileURLWithPath: simPath).deletingLastPathComponent().path
-                    let cross = (refFolder != simFolder)
+//                    let id = "\(refPath)::\(simPath)"
+//                    let refFolder = URL(fileURLWithPath: refPath).deletingLastPathComponent().path
+//                    let simFolder = URL(fileURLWithPath: simPath).deletingLastPathComponent().path
+//                    let cross = (refFolder != simFolder)
                     
+                    // NEW (working)
                     await pairs.append(TableRow(
-                        id: id,
                         reference: refPath,
                         similar: simPath,
-                        percent: similarity,
-                        isCrossFolder: cross
+                        percent: similarity
                     ))
                 }
             }
