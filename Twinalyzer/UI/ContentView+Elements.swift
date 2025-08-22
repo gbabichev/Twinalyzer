@@ -388,4 +388,127 @@ extension ContentView {
             }
         }
     }
+    
+    // MARK: - Preview Image Content
+    func renderPreview(for row: TableRow, size: CGSize) -> some View {
+        // Calculate layout dimensions based on available space
+        let spacing: CGFloat = 20
+        let inset: CGFloat = 16
+        let twoColumnWidth = max(0, size.width - spacing - inset * 2)
+        let singleColumn = twoColumnWidth / 2
+        let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
+        
+        return HStack(alignment: .top, spacing: spacing) {
+            // Left side: Reference image
+            VStack(spacing: 8) {
+                Text("Reference")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text(row.referenceShort)
+                    .font(.caption)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+                
+                PreviewImage(path: row.reference, maxDimension: maxDim)
+                    .frame(maxWidth: maxDim, maxHeight: maxDim)
+                    .clipped()
+                
+                Button("Delete Reference") {
+                    vm.deleteFile(row.reference)
+                }
+                .controlSize(.small)
+                .disabled(vm.isProcessing)
+            }
+            .frame(maxWidth: max(100, singleColumn))
+            
+            // Right side: Match image
+            VStack(spacing: 8) {
+                Text("Match")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text(row.similarShort)
+                    .font(.caption)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                
+                PreviewImage(path: row.similar, maxDimension: maxDim)
+                    .frame(maxWidth: maxDim, maxHeight: maxDim)
+                    .clipped()
+                
+                Button("Delete Match") {
+                    vm.deleteFile(row.similar)
+                }
+                .controlSize(.small)
+                .disabled(vm.isProcessing)
+            }
+            .frame(maxWidth: max(100, singleColumn))
+        }
+        .padding(inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+    
+    // MARK: - Results Table Panel
+    var macOS15Padding: CGFloat {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15 ? 1 : 0
+    }
+
+    var tableView: some View {
+        Table(displayedRows, selection: $tableSelection, sortOrder: $sortOrder) {
+            
+            // Reference column with deletion checkbox
+            TableColumn("Reference", value: \.referenceShortLower) { row in
+                HStack(spacing: 8) {
+                    // Deletion checkbox
+                    Button(action: { toggleRowDeletion(row.id) }) {
+                        Image(systemName: vm.selectedMatchesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
+                            .foregroundColor(vm.selectedMatchesForDeletion.contains(row.id) ? .blue : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 20)
+                    
+                    // Reference path
+                    Text(row.referenceShort)
+                        .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .width(min: 200, ideal: 250)
+            
+            // Match column
+            TableColumn("Match", value: \.similarShortLower) { row in
+                Text(row.similarShort)
+                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .width(min: 200, ideal: 250)
+            
+            // Cross-folder indicator column
+            TableColumn("Cross-Folder", value: \.crossFolderText) { row in
+                Text(row.crossFolderText)
+                    .foregroundStyle(row.isCrossFolder ? .red : .secondary)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .width(90)
+            
+            // Similarity percentage column
+            TableColumn("Similarity", value: \.percent) { row in
+                Text(row.percentDisplay)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .width(80)
+        }
+        .navigationTitle("Results (\(displayedRows.count))")
+        .focused($isTableFocused)
+        .id(vm.tableReloadToken)  // Force reload on sort changes
+        .transaction { $0.disablesAnimations = true }  // Prevent sort animations
+        .padding(.top, macOS15Padding)
+
+    }
 }

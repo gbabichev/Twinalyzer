@@ -134,4 +134,35 @@ extension ContentView {
         tableSelection.removeAll()
         sortOrder.removeAll()
     }
+    
+    
+    
+    // MARK: - Helper Methods
+    func handleSelectionChange() {
+        selectionDebounceTimer?.invalidate()
+        selectionDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { _ in
+            DispatchQueue.main.async {
+                self.debouncedSelection = self.tableSelection
+            }
+        }
+    }
+    
+    func handleSortOrderChange() {
+        vm.updateDisplayedRows(sortOrder: sortOrder)
+    }
+    
+    func toggleRowDeletion(_ rowID: String) {
+        if vm.selectedMatchesForDeletion.contains(rowID) {
+            vm.selectedMatchesForDeletion.remove(rowID)
+        } else {
+            vm.selectedMatchesForDeletion.insert(rowID)
+        }
+    }
+    
+    
+    
+    
+    
+    
+    
 }

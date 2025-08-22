@@ -14,10 +14,9 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     
-    // Constants for processing view
+    // MARK: - Constant for building the Preview Layout
     let columnWidth: CGFloat = 1000
     let viewportHeight: CGFloat = 200
-    
     @State var atBottom = false
     @State var atTop = true
     
@@ -46,28 +45,6 @@ struct ContentView: View {
     var selectedRow: TableRow? {
         guard let firstID = debouncedSelection.first else { return nil }
         return displayedRows.first(where: { $0.id == firstID })
-    }
-    
-    // MARK: - Helper Methods
-    private func handleSelectionChange() {
-        selectionDebounceTimer?.invalidate()
-        selectionDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { _ in
-            DispatchQueue.main.async {
-                self.debouncedSelection = self.tableSelection
-            }
-        }
-    }
-    
-    private func handleSortOrderChange() {
-        vm.updateDisplayedRows(sortOrder: sortOrder)
-    }
-    
-    private func toggleRowDeletion(_ rowID: String) {
-        if vm.selectedMatchesForDeletion.contains(rowID) {
-            vm.selectedMatchesForDeletion.remove(rowID)
-        } else {
-            vm.selectedMatchesForDeletion.insert(rowID)
-        }
     }
     
     //MARK: - Main UI
@@ -253,132 +230,5 @@ struct ContentView: View {
         ) { result in
             vm.handleCSVExportResult(result)
         }
-    }
-    
-    // MARK: - Table View
-    // Adds compatibiilty for macOS 15.
-    // Padding for the table so it doesn't go under the toolbar.
-    // Not an issue on macOS 26 liquid glass.
-    private var macOS15Padding: CGFloat {
-        ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15 ? 1 : 0
-    }
-    
-    var tableView: some View {
-        Table(displayedRows, selection: $tableSelection, sortOrder: $sortOrder) {
-            
-            // Reference column with deletion checkbox
-            TableColumn("Reference", value: \.referenceShortLower) { row in
-                HStack(spacing: 8) {
-                    // Deletion checkbox
-                    Button(action: { toggleRowDeletion(row.id) }) {
-                        Image(systemName: vm.selectedMatchesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
-                            .foregroundColor(vm.selectedMatchesForDeletion.contains(row.id) ? .blue : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 20)
-                    
-                    // Reference path
-                    Text(row.referenceShort)
-                        .foregroundStyle(row.isCrossFolder ? .red : .primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .width(min: 200, ideal: 250)
-            
-            // Match column
-            TableColumn("Match", value: \.similarShortLower) { row in
-                Text(row.similarShort)
-                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .width(min: 200, ideal: 250)
-            
-            // Cross-folder indicator column
-            TableColumn("Cross-Folder", value: \.crossFolderText) { row in
-                Text(row.crossFolderText)
-                    .foregroundStyle(row.isCrossFolder ? .red : .secondary)
-                    .font(.system(.body, design: .monospaced))
-            }
-            .width(90)
-            
-            // Similarity percentage column
-            TableColumn("Similarity", value: \.percent) { row in
-                Text(row.percentDisplay)
-                    .font(.system(.body, design: .monospaced))
-            }
-            .width(80)
-        }
-        .navigationTitle("Results (\(displayedRows.count))")
-        .focused($isTableFocused)
-        .id(vm.tableReloadToken)  // Force reload on sort changes
-        .transaction { $0.disablesAnimations = true }  // Prevent sort animations
-        .padding(.top, macOS15Padding)
-
-    }
-    
-    // MARK: - Preview Layout
-    @ViewBuilder
-    func renderPreview(for row: TableRow, size: CGSize) -> some View {
-        // Calculate layout dimensions based on available space
-        let spacing: CGFloat = 20
-        let inset: CGFloat = 16
-        let twoColumnWidth = max(0, size.width - spacing - inset * 2)
-        let singleColumn = twoColumnWidth / 2
-        let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
-        
-        HStack(alignment: .top, spacing: spacing) {
-            // Left side: Reference image
-            VStack(spacing: 8) {
-                Text("Reference")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text(row.referenceShort)
-                    .font(.caption)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.center)
-                
-                PreviewImage(path: row.reference, maxDimension: maxDim)
-                    .frame(maxWidth: maxDim, maxHeight: maxDim)
-                    .clipped()
-                
-                Button("Delete Reference") {
-                    vm.deleteFile(row.reference)
-                }
-                .controlSize(.small)
-                .disabled(vm.isProcessing)
-            }
-            .frame(maxWidth: max(100, singleColumn))
-            
-            // Right side: Match image
-            VStack(spacing: 8) {
-                Text("Match")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text(row.similarShort)
-                    .font(.caption)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
-                
-                PreviewImage(path: row.similar, maxDimension: maxDim)
-                    .frame(maxWidth: maxDim, maxHeight: maxDim)
-                    .clipped()
-                
-                Button("Delete Match") {
-                    vm.deleteFile(row.similar)
-                }
-                .controlSize(.small)
-                .disabled(vm.isProcessing)
-            }
-            .frame(maxWidth: max(100, singleColumn))
-        }
-        .padding(inset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
