@@ -12,6 +12,7 @@ import AppKit
 import Combine
 import ImageIO
 import UniformTypeIdentifiers
+import UserNotifications
 
 // MARK: - Main Application State Manager
 @MainActor
@@ -433,6 +434,9 @@ final class AppViewModel: ObservableObject {
     func processImages(progress: @escaping @Sendable (Double) -> Void) {
         guard !isAnyOperationRunning else { return }
         
+        // Ask for notification permission (once). Safe if called repeatedly.
+        ensureNotificationAuthorization()
+        
         // Clear the static snapshot up front
         folderClustersStatic.removeAll()
         representativeImageByFolderStatic.removeAll()
@@ -502,13 +506,14 @@ final class AppViewModel: ObservableObject {
                 self.processingProgress = nil
                 self.isProcessing = false
                 self.analysisTask = nil
+                // Notify user: matches = number of table rows (reference/similar pairs)
+                let matches = self.tableRows.count
+                self.postProcessingDoneNotification(matches: matches)
             }
         }
     }
-    
-    /// Builds the frozen snapshot from the current comparison results
-    
-private func buildFolderDuplicatesSnapshot() {
+        
+    private func buildFolderDuplicatesSnapshot() {
         let rows = tableRows
 
         // Representative image per folder
@@ -604,7 +609,6 @@ private func buildFolderDuplicatesSnapshot() {
         self.orderedCrossFolderPairsStatic = orderedPairs
     }
 
-    
     func cancelAnalysis() {
         cancelAllOperations()
         isProcessing = false
@@ -783,5 +787,78 @@ private func buildFolderDuplicatesSnapshot() {
                 .filter { discoveredSet.contains($0) }
         )
     }
+    
+    // MARK: - Notifications / Badge
+
+    // Ask for notification permission (once). Safe to call repeatedly.
+    func ensureNotificationAuthorization() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            // Use async API to avoid capturing a non‑Sendable value.
+            Task {
+                _ = try? await UNUserNotificationCenter.current()
+                    .requestAuthorization(options: [.alert, .sound, .badge])
+            }
+        }
+    }
+
+    /// Post a banner and set a Dock badge. Safe to call from any thread.
+    // Banner + Dock badge; call when analysis completes.
+    func postProcessingDoneNotification(matches: Int) {
+        let content = UNMutableNotificationContent()
+        content.title = "Analysis complete"
+        content.body = matches > 0 ? "Found \(matches) similar pairs." : "No similar pairs found."
+        content.sound = .default
+        content.badge = NSNumber(value: 1)
+        content.threadIdentifier = "twinalyzer.analysis"
+
+        let req = UNNotificationRequest(
+            identifier: "analysis-complete-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+
+        DispatchQueue.main.async {
+            NSApp.dockTile.badgeLabel = "1"
+        }
+    }
+
+    // Clear Dock badge + remove our delivered/pending notifications + reset badge count.
+    func clearDockBadge() {
+        // 1) Dock badge
+        DispatchQueue.main.async {
+            NSApp.dockTile.badgeLabel = nil
+        }
+
+        // 2) Delivered notifications (only ours)
+        UNUserNotificationCenter.current().getDeliveredNotifications { notes in
+            let ids = notes
+                .filter { $0.request.content.threadIdentifier == "twinalyzer.analysis" }
+                .map { $0.request.identifier }
+
+            if !ids.isEmpty {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+            }
+
+            // Pending in same thread
+            UNUserNotificationCenter.current().getPendingNotificationRequests { reqs in
+                let pendingIDs = reqs
+                    .filter { $0.content.threadIdentifier == "twinalyzer.analysis" }
+                    .map { $0.identifier }
+
+                if !pendingIDs.isEmpty {
+                    UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: pendingIDs)
+                }
+            }
+        }
+
+        // 3) Reset the system badge (macOS 13+)
+        if #available(macOS 13.0, *) {
+            UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
+        }
+    }
+    
 }
 

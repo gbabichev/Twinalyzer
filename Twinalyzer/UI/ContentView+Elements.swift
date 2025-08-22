@@ -246,7 +246,6 @@ extension ContentView {
                     Button("Open Folder") {
                         selectFolders()
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

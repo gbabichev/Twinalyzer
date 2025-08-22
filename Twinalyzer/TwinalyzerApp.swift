@@ -22,6 +22,9 @@ struct TwinalyzerApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appViewModel)
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    appViewModel.clearDockBadge()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
