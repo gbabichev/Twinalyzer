@@ -138,7 +138,7 @@ struct ContentView: View {
                     Label("Settings", systemImage: "gearshape")
                 }
                 .popover(isPresented: $showSettingsPopover) {
-                    controlsPanelPopover
+                    settingsPanelPopover
                 }
                 .disabled(vm.isAnyOperationRunning)
             }
