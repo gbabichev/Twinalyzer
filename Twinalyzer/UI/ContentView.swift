@@ -234,6 +234,12 @@ struct ContentView: View {
             // Reset sort when new results arrive
             sortOrder = []
             vm.updateDisplayedRows(sortOrder: [])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    if !displayedRows.isEmpty {
+                        tableSelection = [displayedRows.first!.id]
+                        isTableFocused = true
+                    }
+                }
         }
         .onAppear {
             // Initialize display on first load
@@ -309,6 +315,7 @@ struct ContentView: View {
         .id(vm.tableReloadToken)  // Force reload on sort changes
         .transaction { $0.disablesAnimations = true }  // Prevent sort animations
         .padding(.top, macOS15Padding)
+
     }
     
     // MARK: - Preview Layout
