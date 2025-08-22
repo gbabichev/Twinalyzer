@@ -78,7 +78,6 @@ struct ContentView: View {
                         .navigationSplitViewColumnWidth(min: 100, ideal:200, max:300)
                 } content: {
                     tableView
-                        .navigationSplitViewColumnWidth(min: 500, ideal: 600)
                 } detail: {
                     detailSplitView
                         .navigationSplitViewColumnWidth(min: 200, ideal: 400)
@@ -87,6 +86,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 1200, minHeight: 600)
+        .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
@@ -236,6 +236,13 @@ struct ContentView: View {
     }
     
     // MARK: - Table View
+    // Adds compatibiilty for macOS 15.
+    // Padding for the table so it doesn't go under the toolbar.
+    // Not an issue on macOS 26 liquid glass. 
+    private var macOS15Padding: CGFloat {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15 ? 1 : 0
+    }
+    
     var tableView: some View {
         Table(displayedRows, selection: $tableSelection, sortOrder: $sortOrder) {
             
@@ -283,11 +290,11 @@ struct ContentView: View {
             }
             .width(80)
         }
-        .tableStyle(.automatic)
         .navigationTitle("Results (\(displayedRows.count))")
         .focused($isTableFocused)
         .id(vm.tableReloadToken)  // Force reload on sort changes
         .transaction { $0.disablesAnimations = true }  // Prevent sort animations
+        .padding(.top, macOS15Padding)
     }
     
     // MARK: - Preview Layout
