@@ -118,50 +118,7 @@ extension ContentView {
     var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             if !vm.discoveredLeafFolders.isEmpty {
-                List {
-                    HStack {
-                        Image(systemName: "folder.fill")
-                             .font(.system(size: 14))
-                             .frame(width: 16, height: 16)
-                        
-                        Text("Selected Folders")
-                            .font(.title3)
-                    }
-
-                    Divider()
-                    ForEach(vm.activeLeafFolders, id: \.self) { leafURL in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(leafURL.lastPathComponent)
-                                    .font(.body)
-                                    .lineLimit(1)
-                                
-                                Text(DisplayHelpers.formatFolderDisplayName(for: leafURL))
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .textSelection(.enabled)
-                            }
-                            
-                            Spacer(minLength: 4)
-                            
-                            if !vm.isProcessing {
-                                Button {
-                                    vm.removeLeafFolder(leafURL)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.red.opacity(0.7))
-                                        .font(.system(size: 14))
-                                }
-                                .buttonStyle(.plain)
-                                .help("Remove this folder")
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-                .listStyle(.sidebar)
+                SidebarHoverList(vm: vm)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "folder.badge.plus")
@@ -439,6 +396,112 @@ extension ContentView {
         .transaction { $0.disablesAnimations = true }  // Prevent sort animations
         .padding(.top, macOS15Padding)
 
+    }
+}
+
+private struct SidebarHoverList: View {
+    @ObservedObject var vm: AppViewModel
+    @State private var hoveredLeafIdx: Int? = nil
+
+    var body: some View {
+        List {
+            Section(
+                header:
+                    HStack {
+                        Text("Selected Folders")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.bottom, 10)
+            ) {
+                ForEach(Array(vm.activeLeafFolders.enumerated()), id: \.offset) { idx, leafURL in
+                    let parentName = leafURL.deletingLastPathComponent().lastPathComponent
+                    let leafName = leafURL.lastPathComponent
+                    let displayPath = "\(parentName)\\\(leafName)"
+
+                    HStack {
+                        Image(systemName: "folder")
+                            .imageScale(.medium)
+                            .foregroundStyle(.secondary)
+
+                        Text(displayPath)
+                            .font(.callout)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        Spacer()
+
+                        if hoveredLeafIdx == idx && !vm.isProcessing {
+                            Button {
+                                vm.removeLeafFolder(leafURL)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .imageScale(.small)
+                                    .foregroundStyle(.tertiary)
+                                    .accessibilityLabel("Remove folder")
+                            }
+                            .buttonStyle(.borderless)
+                            .transition(.opacity)
+                        }
+                    }
+                    .padding(.vertical, 1)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        hoveredLeafIdx = inside ? idx : (hoveredLeafIdx == idx ? nil : hoveredLeafIdx)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .listSectionSeparator(.automatic)
+        .listRowSeparator(.automatic)
+    }
+}
+
+
+private struct SidebarLeafRow: View {
+    let leafURL: URL
+    let isProcessing: Bool
+    let removeAction: (URL) -> Void
+    @State private var isHovering = false
+    var body: some View {
+        HStack {
+            Image(systemName: "folder")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(leafURL.lastPathComponent)
+                    .font(.body)
+                    .lineLimit(1)
+                
+                Text(DisplayHelpers.formatFolderDisplayName(for: leafURL))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            
+            Spacer(minLength: 4)
+            
+            if !isProcessing && isHovering {
+                Button {
+                    removeAction(leafURL)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .imageScale(.small)
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove this folder")
+            }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.01)) {
+                isHovering = hovering
+            }
+        }
     }
 }
 
