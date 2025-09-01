@@ -114,77 +114,6 @@ extension ContentView {
         }
     }
     
-    // MARK: - Settings Panel
-    var settingsPanelPopover: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Settings").font(.headline)
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Ignored Folder Name").font(.subheadline)
-                    Image(systemName: "info.circle").foregroundColor(.secondary).font(.caption)
-                        .help("Enter a folder name to skip during scanning. For example, entering 'thumb' will ignore all folders named 'thumb' at any level in the directory tree.")
-                }
-                HStack {
-                    TextField("Enter folder name to ignore", text: Binding(
-                        get: { vm.ignoredFolderName },
-                        set: { newValue in DispatchQueue.main.async { vm.ignoredFolderName = newValue } }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    if !vm.ignoredFolderName.isEmpty {
-                        Button {
-                            DispatchQueue.main.async { vm.ignoredFolderName = "" }
-                        } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Clear ignored folder name")
-                    }
-                }
-            }
-            
-            Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Analysis Method").font(.subheadline)
-                    Button(action: {}) {
-                        Image(systemName: "info.circle").foregroundColor(.secondary).font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Enhanced Scan: AI-based analysis that can detect similar content even with different crops or lighting.\nAnything under ~66% produces lots of false positives. \n\nBasic Scan: Fast comparison using image fingerprints, good for exact duplicates.\nAnything under 80% produces lots of false positives.")
-                }
-                Picker("", selection: Binding(
-                    get: { vm.selectedAnalysisMode },
-                    set: { newValue in DispatchQueue.main.async { vm.selectedAnalysisMode = newValue } }
-                )) {
-                    ForEach(AnalysisMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            
-            VStack {
-                Text("Similarity Threshold")
-                Slider(
-                    value: Binding(
-                        get: { vm.similarityThreshold },
-                        set: { newValue in DispatchQueue.main.async { vm.similarityThreshold = newValue } }
-                    ),
-                    in: 0.45...1.0,
-                    step: 0.01
-                )
-                Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(20)
-    }
-    
     // MARK: - Sidebar Content
     var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -510,5 +439,89 @@ extension ContentView {
         .transaction { $0.disablesAnimations = true }  // Prevent sort animations
         .padding(.top, macOS15Padding)
 
+    }
+}
+
+struct SettingsPanelPopover: View {
+    @ObservedObject var vm: AppViewModel
+    @FocusState private var textFieldFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Ignored Folder Name")
+                .bold()
+            
+            ZStack(alignment: .trailing) {
+                TextField("Enter folder name to ignore", text: Binding(
+                    get: { vm.ignoredFolderName },
+                    set: { newValue in DispatchQueue.main.async { vm.ignoredFolderName = newValue } }
+                ))
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(textFieldFocused ? .blue : .clear, lineWidth: 1)
+                )
+                .focused($textFieldFocused)
+
+                if !vm.ignoredFolderName.isEmpty {
+                    Button {
+                        DispatchQueue.main.async { vm.ignoredFolderName = "" }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                            .padding(.trailing, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear ignored folder name")
+                }
+            }
+
+            Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
+                .toggleStyle(.switch)
+            
+            Divider()
+
+            HStack {
+                Text("Analysis Method")
+                    .bold()
+                Button(action: {}) {
+                    Image(systemName: "info.circle").foregroundColor(.secondary).font(.caption)
+                }
+                .buttonStyle(.plain)
+                .help("Enhanced Scan: AI-based analysis that can detect similar content even with different crops or lighting.\nAnything under ~66% produces lots of false positives. \n\nBasic Scan: Fast comparison using image fingerprints, good for exact duplicates.\nAnything under 80% produces lots of false positives.")
+            }
+            Picker("", selection: Binding(
+                get: { vm.selectedAnalysisMode },
+                set: { newValue in DispatchQueue.main.async { vm.selectedAnalysisMode = newValue } }
+            )) {
+                ForEach(AnalysisMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("Similarity Threshold")
+                .bold()
+            Slider(
+                value: Binding(
+                    get: { vm.similarityThreshold },
+                    set: { newValue in DispatchQueue.main.async { vm.similarityThreshold = newValue } }
+                ),
+                in: 0.5...1.0,
+                step: 0.01
+            )
+            Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            
+        }
+        .padding(20)
     }
 }

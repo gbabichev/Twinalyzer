@@ -9,6 +9,7 @@
 
 import SwiftUI
 import UserNotifications
+
 @main
 struct TwinalyzerApp: App {
     init() {
