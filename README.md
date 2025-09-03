@@ -1,8 +1,13 @@
-# Twinalyzer – Find Duplicate & Similar Photos, Fast ⚡️🖼️
+# Twinalyzer – Find Duplicate & Similar Photos
 
 Twinalyzer is a SwiftUI app that scans your folders and groups **duplicate** and **look‑alike** photos—even when they’re resized, rotated, lightly edited, or named differently. It blends a **perceptual hash** for speed with **Apple Vision deep embeddings** for high‑quality similarity, then shows you crisp previews so you can keep only the best.
 
 ## 🖥️ Screenshots 
+
+<p align="center">
+    <img src="Documentation/1.png" width="40%">
+    <img src="Documentation/2.png" width="40%">
+</p>
 
 ## ✨ Highlights
 

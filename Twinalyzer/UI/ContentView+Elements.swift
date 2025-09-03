@@ -617,10 +617,14 @@ struct SettingsPanelPopover: View {
                     .help("Clear ignored folder name")
                 }
             }
-
-            Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
-                .toggleStyle(.switch)
             
+            VStack(alignment: .leading, spacing: 5) {
+                Toggle("Limit scan to selected folders only", isOn: $vm.scanTopLevelOnly)
+                    .toggleStyle(.switch)
+                Text("Will not scan for duplicates between folders. ")
+                    .font(.footnote)
+            }
+
             Divider()
 
             HStack {
