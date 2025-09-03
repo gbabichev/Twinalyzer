@@ -21,7 +21,7 @@ import CoreGraphics
 import ImageIO
 @preconcurrency import Vision
 @preconcurrency import CoreImage
-import Darwin
+
 // MARK: - Main Image Analysis Engine
 /// Static enum containing all image analysis functionality
 /// Provides both AI-based deep feature analysis and traditional perceptual hashing
@@ -31,7 +31,7 @@ import Darwin
 enum ImageAnalyzer {
     
     // MARK: - Configuration Constants
-    private nonisolated static let maxBatchSize = 1000          // Limit processing to prevent memory issues
+    private nonisolated static let maxBatchSize = 5000          // Limit processing to prevent memory issues
     private nonisolated static let fileSystemChunkSize = 50     // Process directories in chunks
     
     // MARK: - Progress Tracking Utilities

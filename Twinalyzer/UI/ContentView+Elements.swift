@@ -9,8 +9,35 @@
 
 import SwiftUI
 import AppKit
+import QuickLookUI
 
 extension ContentView {
+    
+    // MARK: - Quick Look Support
+    final class QuickLookPreview: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+        static let shared = QuickLookPreview()
+        private var items: [NSURL] = []
+
+        func show(urls: [URL]) {
+            items = urls.map { $0 as NSURL }
+            guard let panel = QLPreviewPanel.shared() else { return }
+            panel.dataSource = self
+            panel.delegate  = self
+            if !panel.isVisible { panel.makeKeyAndOrderFront(nil) }
+            panel.reloadData()
+            panel.currentPreviewItemIndex = 0
+        }
+
+        // QLPreviewPanelDataSource
+        func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { items.count }
+        func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! { items[index] }
+    }
+
+    @MainActor
+    private func openInQuickLook(at path: String) {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        QuickLookPreview.shared.show(urls: [URL(fileURLWithPath: path)])
+    }
     
     // MARK: - Processing View
     var processingView: some View {
@@ -297,9 +324,16 @@ extension ContentView {
                     .truncationMode(.middle)
                     .multilineTextAlignment(.center)
                 
-                PreviewImage(path: row.reference, maxDimension: maxDim)
-                    .frame(maxWidth: maxDim, maxHeight: maxDim)
-                    .clipped()
+                Button {
+                    openInQuickLook(at: row.reference)
+                } label: {
+                    PreviewImage(path: row.reference, maxDimension: maxDim)
+                        .frame(maxWidth: maxDim, maxHeight: maxDim)
+                        .clipped()
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open in Preview")
                 
                 Button("Delete Reference") {
                     vm.deleteFile(row.reference)
@@ -322,9 +356,27 @@ extension ContentView {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(row.isCrossFolder ? .red : .primary)
                 
-                PreviewImage(path: row.similar, maxDimension: maxDim)
-                    .frame(maxWidth: maxDim, maxHeight: maxDim)
-                    .clipped()
+                Button {
+                    openInQuickLook(at: row.similar)
+                } label: {
+                    PreviewImage(path: row.similar, maxDimension: maxDim)
+                        .frame(maxWidth: maxDim, maxHeight: maxDim)
+                        .clipped()
+                        .contentShape(Rectangle())
+                        .overlay(alignment: .topLeading) {
+                            // Non-interactive badge so clicks still trigger Quick Look
+                            Text(row.percentDisplay) // e.g. “97.2%”
+                                .font(.caption2).fontDesign(.monospaced)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .shadow(radius: 1.5, y: 0.5)
+                                .padding(6)
+                                .allowsHitTesting(false)
+                        }
+                }
+                .buttonStyle(.plain)
+                .help("Open in Preview")
                 
                 Button("Delete Match") {
                     vm.deleteFile(row.similar)
@@ -395,6 +447,14 @@ extension ContentView {
         .id(vm.tableReloadToken)  // Force reload on sort changes
         .transaction { $0.disablesAnimations = true }  // Prevent sort animations
         .padding(.top, macOS15Padding)
+        .overlay {
+            if vm.discoveredLeafFolders.isEmpty {
+                ContentUnavailableView("No files",
+                                       systemImage: "magnifyingglass",
+                                       description: Text("Drop a folder or add files to begin."))
+                    .transition(.opacity)
+            }
+        }
 
     }
 }
@@ -414,7 +474,20 @@ private struct SidebarHoverList: View {
                     }
                     .padding(.bottom, 10)
             ) {
-                ForEach(Array(vm.activeLeafFolders.enumerated()), id: \.offset) { idx, leafURL in
+                // Human-friendly sort: first by parent folder name, then by folder name (numeric & case aware)
+                let sortedLeaves = vm.activeLeafFolders.sorted { lhs, rhs in
+                    let lp = lhs.deletingLastPathComponent().lastPathComponent
+                    let ln = lhs.lastPathComponent
+                    let rp = rhs.deletingLastPathComponent().lastPathComponent
+                    let rn = rhs.lastPathComponent
+                    let parentOrder = lp.localizedStandardCompare(rp)
+                    if parentOrder == .orderedSame {
+                        return ln.localizedStandardCompare(rn) == .orderedAscending
+                    }
+                    return parentOrder == .orderedAscending
+                }
+
+                ForEach(Array(sortedLeaves.enumerated()), id: \.offset) { idx, leafURL in
                     let parentName = leafURL.deletingLastPathComponent().lastPathComponent
                     let leafName = leafURL.lastPathComponent
                     let displayPath = "\(parentName)\\\(leafName)"
@@ -457,7 +530,6 @@ private struct SidebarHoverList: View {
         .listRowSeparator(.automatic)
     }
 }
-
 
 private struct SidebarLeafRow: View {
     let leafURL: URL

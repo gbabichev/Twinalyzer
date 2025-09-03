@@ -802,25 +802,34 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// Post a banner and set a Dock badge. Safe to call from any thread.
-    // Banner + Dock badge; call when analysis completes.
+    /// Post a banner and set a Dock badge only if app is NOT frontmost. Safe to call from any thread.
     func postProcessingDoneNotification(matches: Int) {
-        let content = UNMutableNotificationContent()
-        content.title = "Analysis complete"
-        content.body = matches > 0 ? "Found \(matches) similar pairs." : "No similar pairs found."
-        content.sound = .default
-        content.badge = NSNumber(value: 1)
-        content.threadIdentifier = "twinalyzer.analysis"
-
-        let req = UNNotificationRequest(
-            identifier: "analysis-complete-\(UUID().uuidString)",
-            content: content,
-            trigger: nil
-        )
-
-        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
-
+        // Check foreground state on the main thread; if the app is frontmost, do nothing.
         DispatchQueue.main.async {
+            // Treat the app as "in focus" if it is the active (frontmost) app.
+            // (Optionally, also consider key/main window status.)
+            let appIsFrontmost = NSApp.isActive
+            if appIsFrontmost {
+                // App is in focus: don't post a notification and don't set a Dock badge.
+                return
+            }
+
+            // App is NOT frontmost → post a banner + set Dock badge
+            let content = UNMutableNotificationContent()
+            content.title = "Analysis complete"
+            content.body = matches > 0 ? "Found \(matches) similar pairs." : "No similar pairs found."
+            content.sound = .default
+            content.badge = NSNumber(value: 1)
+            content.threadIdentifier = "twinalyzer.analysis"
+
+            let req = UNNotificationRequest(
+                identifier: "analysis-complete-\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
+
+            UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+
             NSApp.dockTile.badgeLabel = "1"
         }
     }
