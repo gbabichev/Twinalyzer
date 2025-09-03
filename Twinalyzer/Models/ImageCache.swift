@@ -29,14 +29,6 @@ private enum _ImageCacheConfig {
 class ImageCache {
     /// Shared cache instance accessible throughout the app
     /// NSCache is thread-safe and handles memory pressure automatically
-    ///
-    
-    private static let _bootstrap: Void = {
-        configureCacheLimits()
-        setupMemoryPressureMonitoring()
-    }()
-    @inline(__always) static func ensureBootstrapped() { _ = _bootstrap }
-
     static let shared = NSCache<NSString, NSImage>()
     
     // MARK: - Configuration
@@ -45,11 +37,37 @@ class ImageCache {
     
     /// Private initializer to enforce singleton pattern
     /// Configures cache limits during first access to shared instance
+    private static let _bootstrap: Void = {
+        configureCacheLimits()
+        setupMemoryPressureMonitoring()
+    }()
+    @inline(__always) static func ensureBootstrapped() { _ = _bootstrap }
+
+    /// Private initializer to enforce singleton pattern
+    /// Configures cache limits during first access to shared instance
     private init() {
         // Configure initial cache limits
         Self.configureCacheLimits()
         // Set up memory pressure monitoring
         Self.setupMemoryPressureMonitoring()
+    }
+    
+    // MARK: - Enhanced Memory Management
+    
+    /// Add aggressive cleanup methods
+    static func clearCache() {
+        shared.removeAllObjects()
+    }
+    
+    static func reduceCacheSize() {
+        // Reduce cache limits during cleanup
+        shared.countLimit = shared.countLimit / 4
+        shared.totalCostLimit = shared.totalCostLimit / 4
+        
+        // Restore after a delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            configureCacheLimits()
+        }
     }
     
     /// Configure cache limits based on current memory situation
@@ -191,4 +209,3 @@ enum ImageProcessingUtilities {
         return 2048
     }
 }
-

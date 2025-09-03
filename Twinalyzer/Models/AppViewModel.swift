@@ -433,7 +433,7 @@ final class AppViewModel: ObservableObject {
     // MARK: - Analysis Operations
     func processImages(progress: @escaping @Sendable (Double) -> Void) {
         guard !isAnyOperationRunning else { return }
-        
+        performMemoryCleanup()
         // Ask for notification permission (once). Safe if called repeatedly.
         ensureNotificationAuthorization()
         
@@ -500,13 +500,15 @@ final class AppViewModel: ObservableObject {
                 if !Task.isCancelled {
                     self.comparisonResults = results
                     self.updateDisplayedRows(sortOrder: [])
-                    // Build the static snapshot once per run
                     self.buildFolderDuplicatesSnapshot()
+                    
+                    // Cleanup after analysis complete
+                    self.performPostAnalysisCleanup()
                 }
                 self.processingProgress = nil
                 self.isProcessing = false
                 self.analysisTask = nil
-                // Notify user: matches = number of table rows (reference/similar pairs)
+                
                 let matches = self.tableRows.count
                 self.postProcessingDoneNotification(matches: matches)
             }
@@ -686,23 +688,29 @@ final class AppViewModel: ObservableObject {
     
     // MARK: - State Management
     func clearAll() {
-        cancelAllOperations()
-        isProcessing = false
-        isDiscoveringFolders = false
-        processingProgress = nil
-        selectedParentFolders.removeAll()
-        excludedLeafFolders.removeAll()
-        discoveredLeafFolders.removeAll()
-        selectedMatchesForDeletion.removeAll()
-        comparisonResults.removeAll()
-        activeSortedRows.removeAll()
-        
-        // Clear the static snapshot
-        folderClustersStatic.removeAll()
-        representativeImageByFolderStatic.removeAll()
-        crossFolderDuplicateCountsStatic.removeAll()
-        folderDisplayNamesStatic.removeAll()
-    }
+            cancelAllOperations()
+            isProcessing = false
+            isDiscoveringFolders = false
+            processingProgress = nil
+            
+            // Clear all arrays without keeping capacity
+            selectedParentFolders.removeAll(keepingCapacity: false)
+            excludedLeafFolders.removeAll()
+            discoveredLeafFolders.removeAll(keepingCapacity: false)
+            selectedMatchesForDeletion.removeAll(keepingCapacity: false)
+            comparisonResults.removeAll(keepingCapacity: false)
+            activeSortedRows.removeAll(keepingCapacity: false)
+            
+            // Clear static snapshots
+            folderClustersStatic.removeAll(keepingCapacity: false)
+            representativeImageByFolderStatic.removeAll(keepingCapacity: false)
+            crossFolderDuplicateCountsStatic.removeAll(keepingCapacity: false)
+            folderDisplayNamesStatic.removeAll(keepingCapacity: false)
+            orderedCrossFolderPairsStatic.removeAll(keepingCapacity: false)
+            
+            // Aggressive memory cleanup
+            performMemoryCleanup()
+        }
     
     // MARK: - Memory Pressure Monitoring
     private func isMemoryPressureHigh() async -> Bool {
@@ -722,6 +730,59 @@ final class AppViewModel: ObservableObject {
                 } else {
                     continuation.resume(returning: false)
                 }
+            }
+        }
+    }
+    
+    // Add explicit cleanup method
+        private func performMemoryCleanup() {
+            // Clear all caches
+            ImageCache.clearCache()
+            
+            // Clear internal caches
+            invalidateAllCaches()
+            
+            // Force garbage collection hint
+            autoreleasepool {
+                // Clear large data structures
+                if !isProcessing {
+                    comparisonResults.removeAll(keepingCapacity: false)
+                    activeSortedRows.removeAll(keepingCapacity: false)
+                    selectedMatchesForDeletion.removeAll(keepingCapacity: false)
+                    
+                    // Clear static snapshots
+                    folderClustersStatic.removeAll(keepingCapacity: false)
+                    representativeImageByFolderStatic.removeAll(keepingCapacity: false)
+                    crossFolderDuplicateCountsStatic.removeAll(keepingCapacity: false)
+                    folderDisplayNamesStatic.removeAll(keepingCapacity: false)
+                    orderedCrossFolderPairsStatic.removeAll(keepingCapacity: false)
+                }
+            }
+        }
+    
+    private func performPostAnalysisCleanup() {
+        // Reduce image cache size after analysis
+        ImageCache.reduceCacheSize()
+        
+        // Clear any temporary processing data
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // Additional cleanup after UI has settled
+            self.compactMemory()
+        }
+    }
+    
+    private func compactMemory() {
+        autoreleasepool {
+            // Force compact internal data structures
+            if let tableRows = _tableRowsCache {
+                _tableRowsCache = Array(tableRows)  // Recreate to compact
+            }
+            
+            // Trim sort cache to only recent entries
+            if _sortCache.count > 5 {
+                let recentKeys = Array(_sortCache.keys.suffix(3))
+                let trimmedCache = _sortCache.filter { recentKeys.contains($0.key) }
+                _sortCache = trimmedCache
             }
         }
     }

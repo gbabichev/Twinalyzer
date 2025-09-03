@@ -22,6 +22,15 @@ import ImageIO
 @preconcurrency import Vision
 @preconcurrency import CoreImage
 
+// MARK: - Array Extension for Batching
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
+    }
+}
+
 // MARK: - Main Image Analysis Engine
 /// Static enum containing all image analysis functionality
 /// Provides both AI-based deep feature analysis and traditional perceptual hashing
@@ -292,13 +301,14 @@ enum ImageAnalyzer {
         return all
     }
     
-    // MARK: - Rest of the implementation (unchanged methods)
+    // MARK: - Enhanced processImageBatch with Memory Management
     
     /// Processes a batch of images through the Vision framework pipeline
     /// Extracts feature vectors from each image then clusters similar ones
     /// Feature extraction is the most time-consuming step
-    /// ENHANCED: Added memory pressure monitoring and cooperative cancellation
-    private nonisolated static func processImageBatch(
+    /// ENHANCED: Restructured to avoid Sendable violations with Vision framework objects
+    @MainActor
+    private static func processImageBatch(
         files: [URL],
         threshold: Double,
         processedSoFar: Int,
@@ -310,8 +320,15 @@ enum ImageAnalyzer {
         var observations: [VNFeaturePrintObservation] = []
         var paths: [String] = []
         
+        // Reserve capacity but limit total processing
+        let maxFiles = min(files.count, 5000) // Limit to prevent excessive memory usage
+        let processFiles = Array(files.prefix(maxFiles))
+        
+        observations.reserveCapacity(processFiles.count)
+        paths.reserveCapacity(processFiles.count)
+        
         // Extract Vision framework feature vectors from each image
-        for (index, url) in files.enumerated() {
+        for (index, url) in processFiles.enumerated() {
             if shouldCancel?() == true { break }
             
             // Yield control periodically to prevent beachballing
@@ -328,6 +345,7 @@ enum ImageAnalyzer {
                 }
             }
             
+            // Extract feature with proper memory management
             if let observation = await extractFeature(from: url) {
                 observations.append(observation)
                 paths.append(url.path)
@@ -336,23 +354,27 @@ enum ImageAnalyzer {
             updateProgress(processedSoFar + index + 1, totalCount, progress)
         }
         
-        // Clustering is fast, so we do it on the main actor for thread safety
-        //        return await MainActor.run {
-        //            _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
-        //        }
-        return await _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
+        // Clustering happens synchronously on MainActor - no Sendable violations
+        let results = _clusterFeaturePrints(observations: observations, paths: paths, threshold: threshold)
+        
+        // Explicit cleanup to free memory
+        observations.removeAll(keepingCapacity: false)
+        paths.removeAll(keepingCapacity: false)
+        
+        return results
     }
     
     /// Extracts a feature vector from a single image using Apple's Vision framework
     /// The feature vector captures semantic content that can be compared across images
     /// Uses autoreleasepool to manage memory during batch processing
-    /// ENHANCED: Added timeout and better error handling
+    /// ENHANCED: Added timeout, better error handling, and aggressive memory management
     private nonisolated static func extractFeature(from url: URL) async -> VNFeaturePrintObservation? {
         return await withCheckedContinuation { continuation in
+            // Use autoreleasepool for the synchronous parts only
             autoreleasepool {
                 let request = VNGenerateImageFeaturePrintRequest()
                 
-                // Load image with orientation correction for accurate analysis
+                // Load image with memory management
                 guard let ciImage = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
                     continuation.resume(returning: nil)
                     return
@@ -404,7 +426,8 @@ enum ImageAnalyzer {
         }
         
         // ENHANCED: Compare all pairs with cooperative cancellation
-        var pairs: [TableRow] = []
+        // FIXED: Collect pair data first, then create TableRows on MainActor
+        var pairData: [(reference: String, similar: String, percent: Double)] = []
         var comparisonCount = 0
         
         for i in 0..<hashes.count {
@@ -415,7 +438,7 @@ enum ImageAnalyzer {
                 
                 // CRITICAL: Yield control periodically in O(n²) loop
                 comparisonCount += 1
-                if comparisonCount % 250 == 0 { // Use literal instead of static property
+                if comparisonCount % 250 == 0 {
                     await Task.yield()
                 }
                 
@@ -424,20 +447,25 @@ enum ImageAnalyzer {
                     let similarity = 1.0 - (Double(distance) / 64.0)
                     let refPath = hashes[i].path
                     let simPath = hashes[j].path
-//                    let id = "\(refPath)::\(simPath)"
-//                    let refFolder = URL(fileURLWithPath: refPath).deletingLastPathComponent().path
-//                    let simFolder = URL(fileURLWithPath: simPath).deletingLastPathComponent().path
-//                    let cross = (refFolder != simFolder)
                     
-                    // NEW (working)
-                    await pairs.append(TableRow(
-                        reference: refPath,
-                        similar: simPath,
-                        percent: similarity
-                    ))
+                    pairData.append((reference: refPath, similar: simPath, percent: similarity))
                 }
             }
         }
+        
+        // Create TableRows on MainActor - FIXED
+        let pairs = await MainActor.run {
+            pairData.map { data in
+                TableRow(
+                    reference: data.reference,
+                    similar: data.similar,
+                    percent: data.percent
+                )
+            }
+        }
+        
+        // Cleanup hashes array
+        hashes.removeAll(keepingCapacity: false)
         
         return pairs
     }
@@ -464,7 +492,8 @@ enum ImageAnalyzer {
     
     /// Advanced clustering algorithm for Vision framework feature vectors
     /// Groups similar images while intelligently choosing reference images
-    /// Must run on MainActor due to Vision framework requirements
+    /// Runs on MainActor to safely work with VNFeaturePrintObservation objects
+    @MainActor
     private static func _clusterFeaturePrints(
         observations: [VNFeaturePrintObservation],
         paths: [String],
@@ -559,8 +588,6 @@ enum ImageAnalyzer {
     }
     
     // MARK: - Enhanced File Discovery and Filtering
-    
-    
     
     /// ENHANCED: Async version with chunked processing and ignored folder filtering
     /// FIXED: Now respects topLevelOnly to prevent discovering new subfolders during analysis
@@ -734,7 +761,8 @@ enum ImageAnalyzer {
                 }
                 
                 if kerr == KERN_SUCCESS {
-                    let isHighMemory = info.resident_size > 512 * 1024 * 1024 // Use literal instead of static property
+                    let memoryThreshold: UInt64 = 512 * 1024 * 1024 // 512MB threshold
+                    let isHighMemory = info.resident_size > memoryThreshold
                     continuation.resume(returning: isHighMemory)
                 } else {
                     // If we can't get memory info, assume we're fine
