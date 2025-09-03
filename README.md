@@ -29,7 +29,7 @@ Twinalyzer is a SwiftUI app that scans your folders and groups **duplicate** and
 5. **Preview & act**—open the original in Finder, inspect pixel‑level differences, or bulk‑decide which to keep. Click images to open in QuickLook! 
 
 
-## 🔍 Troubleshooting
+## 🔍 Troubleshooting & Notes
 
 - **False positives/negatives** → adjust the similarity slider. For highly edited variants, use a slightly **lower** threshold.
 
