@@ -24,13 +24,12 @@ import ImageIO
 
 // MARK: - Array Extension for Batching
 extension Array {
-    func chunked(into size: Int) -> [[Element]] {
+    nonisolated func chunked(into size: Int) -> [[Element]] {
         return stride(from: 0, to: count, by: size).map {
             Array(self[$0..<Swift.min($0 + size, count)])
         }
     }
 }
-
 // MARK: - Main Image Analysis Engine
 /// Static enum containing all image analysis functionality
 /// Provides both AI-based deep feature analysis and traditional perceptual hashing
@@ -40,7 +39,7 @@ extension Array {
 enum ImageAnalyzer {
     
     // MARK: - Configuration Constants
-    private nonisolated static let maxBatchSize = 5000          // Limit processing to prevent memory issues
+    private nonisolated static let maxBatchSize = 1000          // Limit processing to prevent memory issues
     private nonisolated static let fileSystemChunkSize = 50     // Process directories in chunks
     
     // MARK: - Progress Tracking Utilities
@@ -68,14 +67,15 @@ enum ImageAnalyzer {
     /// More computationally intensive but significantly more accurate than hash-based methods
     /// FIXED: Now only processes the exact folders passed in, no re-discovery
     nonisolated static func analyzeWithDeepFeatures(
-        inFolders leafFolders: [URL],  // FIXED: Use exact folders from sidebar
+        inFolders leafFolders: [URL],
         similarityThreshold: Double,
         topLevelOnly: Bool,
         ignoredFolderName: String = "",
         progress: (@Sendable (Double) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
-    ){
+    )
+    {
         Task.detached(priority: .utility) {
             guard shouldCancel?() != true else {
                 await MainActor.run { completion([]) }
@@ -85,7 +85,7 @@ enum ImageAnalyzer {
             var results: [ImageComparisonResult] = []
             
             if topLevelOnly {
-                // Process each folder separately to maintain folder boundaries
+                // Process each folder separately in chunks
                 var totalProcessed = 0
                 let allFiles = await getAllFilesFromExactFolders(
                     folders: leafFolders,
@@ -95,12 +95,6 @@ enum ImageAnalyzer {
                 )
                 let totalCount = allFiles.count
                 
-                // Limit batch size to prevent memory issues
-                let limitedFiles = Array(allFiles.prefix(maxBatchSize))
-                if limitedFiles.count < allFiles.count {
-                    print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
-                }
-                
                 for dir in leafFolders {
                     if shouldCancel?() == true { break }
                     
@@ -109,20 +103,30 @@ enum ImageAnalyzer {
                         ignoredFolderName: ignoredFolderName,
                         shouldCancel: shouldCancel
                     )
-                    let folderResults = await processImageBatch(
-                        files: files,
-                        threshold: similarityThreshold,
-                        processedSoFar: totalProcessed,
-                        totalCount: totalCount,
-                        progress: progress,
-                        shouldCancel: shouldCancel
-                    )
                     
-                    totalProcessed += files.count
-                    results.append(contentsOf: folderResults)
+                    // Process folder files in chunks
+                    let chunks = files.chunked(into: maxBatchSize)
+                    for chunk in chunks {
+                        if shouldCancel?() == true { break }
+                        
+                        let folderResults = await processImageBatch(
+                            files: chunk,
+                            threshold: similarityThreshold,
+                            processedSoFar: totalProcessed,
+                            totalCount: totalCount,
+                            progress: progress,
+                            shouldCancel: shouldCancel
+                        )
+                        
+                        results.append(contentsOf: folderResults)
+                        totalProcessed += chunk.count
+                        
+                        // Brief pause between chunks for memory management
+                        await Task.yield()
+                    }
                 }
             } else {
-                // Process all images together for cross-folder duplicate detection
+                // Process all images together in chunks for cross-folder duplicate detection
                 let allFiles = await getAllFilesFromExactFolders(
                     folders: leafFolders,
                     topLevelOnly: false,
@@ -130,20 +134,28 @@ enum ImageAnalyzer {
                     shouldCancel: shouldCancel
                 )
                 
-                // Limit batch size to prevent memory issues
-                let limitedFiles = Array(allFiles.prefix(maxBatchSize))
-                if limitedFiles.count < allFiles.count {
-                    print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
-                }
+                // Process ALL files in chunks
+                let chunks = allFiles.chunked(into: maxBatchSize)
+                var totalProcessed = 0
                 
-                results = await processImageBatch(
-                    files: limitedFiles,
-                    threshold: similarityThreshold,
-                    processedSoFar: 0,
-                    totalCount: limitedFiles.count,
-                    progress: progress,
-                    shouldCancel: shouldCancel
-                )
+                for chunk in chunks {
+                    if shouldCancel?() == true { break }
+                    
+                    let chunkResults = await processImageBatch(
+                        files: chunk,
+                        threshold: similarityThreshold,
+                        processedSoFar: totalProcessed,
+                        totalCount: allFiles.count,
+                        progress: progress,
+                        shouldCancel: shouldCancel
+                    )
+                    
+                    results.append(contentsOf: chunkResults)
+                    totalProcessed += chunk.count
+                    
+                    // Brief pause between chunks for memory management
+                    await Task.yield()
+                }
             }
             
             // Return results on main thread
@@ -167,7 +179,8 @@ enum ImageAnalyzer {
         progress: (@Sendable (Double) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
-    ) {
+    )
+    {
         // Convert similarity threshold to maximum Hamming distance
         // 64-bit hash allows 0-64 bit differences
         let maxDist = max(0, min(64, Int((1.0 - similarityThreshold) * 64.0)))
@@ -200,9 +213,8 @@ enum ImageAnalyzer {
     }
     
     /// Computes perceptual hash pairs for similarity comparison
-    /// FIXED: Only processes exact folders passed in, no re-discovery
     private nonisolated static func computeHashPairs(
-        folders: [URL],  // FIXED: Use exact folders from sidebar
+        folders: [URL],
         topLevelOnly: Bool,
         maxDist: Int,
         ignoredFolderName: String = "",
@@ -215,7 +227,7 @@ enum ImageAnalyzer {
         var allPairs: [TableRow] = []
         
         if topLevelOnly {
-            // Process folders separately for folder-specific analysis
+            // Process folders separately in chunks
             var totalProcessed = 0
             let allFiles = await getAllFilesFromExactFolders(
                 folders: folders,
@@ -223,7 +235,7 @@ enum ImageAnalyzer {
                 ignoredFolderName: ignoredFolderName,
                 shouldCancel: shouldCancel
             )
-            let totalCount = min(allFiles.count, maxBatchSize) // Limit processing
+            let totalCount = allFiles.count
             
             for dir in folders {
                 if shouldCancel?() == true { break }
@@ -233,40 +245,57 @@ enum ImageAnalyzer {
                     ignoredFolderName: ignoredFolderName,
                     shouldCancel: shouldCancel
                 )
-                let pairs = await hashAndCompareWithProgress(
-                    files: files,
-                    maxDist: maxDist,
-                    processedSoFar: totalProcessed,
-                    totalCount: totalCount,
-                    progress: progress,
-                    shouldCancel: shouldCancel
-                )
-                allPairs.append(contentsOf: pairs)
                 
-                totalProcessed += files.count
+                // Process folder files in chunks
+                let chunks = files.chunked(into: maxBatchSize)
+                for chunk in chunks {
+                    if shouldCancel?() == true { break }
+                    
+                    let pairs = await hashAndCompareWithProgress(
+                        files: chunk,
+                        maxDist: maxDist,
+                        processedSoFar: totalProcessed,
+                        totalCount: totalCount,
+                        progress: progress,
+                        shouldCancel: shouldCancel
+                    )
+                    allPairs.append(contentsOf: pairs)
+                    totalProcessed += chunk.count
+                    
+                    // Brief pause between chunks
+                    await Task.yield()
+                }
             }
         } else {
-            // Process all files together for cross-folder comparison
+            // Process all files together in chunks for cross-folder comparison
             let allFiles = await getAllFilesFromExactFolders(
                 folders: folders,
                 topLevelOnly: false,
                 ignoredFolderName: ignoredFolderName,
                 shouldCancel: shouldCancel
             )
-            let limitedFiles = Array(allFiles.prefix(maxBatchSize)) // Limit to prevent memory issues
             
-            if limitedFiles.count < allFiles.count {
-                print("Warning: Limited processing to \(maxBatchSize) files due to memory constraints")
+            // Process ALL files in chunks
+            let chunks = allFiles.chunked(into: maxBatchSize)
+            var totalProcessed = 0
+            
+            for chunk in chunks {
+                if shouldCancel?() == true { break }
+                
+                let pairs = await hashAndCompareWithProgress(
+                    files: chunk,
+                    maxDist: maxDist,
+                    processedSoFar: totalProcessed,
+                    totalCount: allFiles.count,
+                    progress: progress,
+                    shouldCancel: shouldCancel
+                )
+                allPairs.append(contentsOf: pairs)
+                totalProcessed += chunk.count
+                
+                // Brief pause between chunks
+                await Task.yield()
             }
-            
-            allPairs = await hashAndCompareWithProgress(
-                files: limitedFiles,
-                maxDist: maxDist,
-                processedSoFar: 0,
-                totalCount: limitedFiles.count,
-                progress: progress,
-                shouldCancel: shouldCancel
-            )
         }
         
         // Return pairs sorted by similarity percentage (highest first)
@@ -320,15 +349,12 @@ enum ImageAnalyzer {
         var observations: [VNFeaturePrintObservation] = []
         var paths: [String] = []
         
-        // Reserve capacity but limit total processing
-        let maxFiles = min(files.count, 5000) // Limit to prevent excessive memory usage
-        let processFiles = Array(files.prefix(maxFiles))
-        
-        observations.reserveCapacity(processFiles.count)
-        paths.reserveCapacity(processFiles.count)
+        // Process all files in this chunk (no additional limiting)
+        observations.reserveCapacity(files.count)
+        paths.reserveCapacity(files.count)
         
         // Extract Vision framework feature vectors from each image
-        for (index, url) in processFiles.enumerated() {
+        for (index, url) in files.enumerated() {
             if shouldCancel?() == true { break }
             
             // Yield control periodically to prevent beachballing
@@ -336,14 +362,7 @@ enum ImageAnalyzer {
                 await Task.yield()
             }
             
-            // Check memory pressure every 50 images
-            if index % 50 == 0 {
-                let memoryPressure = await isMemoryPressureHigh()
-                if memoryPressure {
-                    print("Warning: High memory pressure detected, limiting processing")
-                    break
-                }
-            }
+            // Remove memory pressure check - chunking handles this
             
             // Extract feature with proper memory management
             if let observation = await extractFeature(from: url) {
@@ -744,31 +763,5 @@ enum ImageAnalyzer {
     /// Counts the number of differing bits using XOR and bit counting
     nonisolated static func hammingDistance(_ a: UInt64, _ b: UInt64) -> Int {
         Int((a ^ b).nonzeroBitCount)
-    }
-
-    // MARK: - Memory Pressure Monitoring
-    /// Checks if system is under memory pressure
-    /// Returns true if available memory is low or if resident memory exceeds threshold
-    private nonisolated static func isMemoryPressureHigh() async -> Bool {
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                var info = mach_task_basic_info()
-                var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
-                let kerr = withUnsafeMutablePointer(to: &info) {
-                    $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-                        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-                    }
-                }
-                
-                if kerr == KERN_SUCCESS {
-                    let memoryThreshold: UInt64 = 512 * 1024 * 1024 // 512MB threshold
-                    let isHighMemory = info.resident_size > memoryThreshold
-                    continuation.resume(returning: isHighMemory)
-                } else {
-                    // If we can't get memory info, assume we're fine
-                    continuation.resume(returning: false)
-                }
-            }
-        }
     }
 }

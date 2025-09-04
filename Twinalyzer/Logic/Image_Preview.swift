@@ -31,7 +31,7 @@ struct PreviewImage: View {
     
     // MARK: - Constants
     private static let loadingTimeout: TimeInterval = 10.0  // 10 second timeout for image loading
-    fileprivate let MEMORY_PRESSURE_THRESHOLD: UInt64 = 512 * 1024 * 1024
+    fileprivate let MEMORY_PRESSURE_THRESHOLD: UInt64 = 512000 * 1024 * 1024
     
     // MARK: - Initializers
     /// Default initializer with standard priority
@@ -191,13 +191,6 @@ struct PreviewImage: View {
         guard !Task.isCancelled, pathToLoad == self.path else { return }
         await MainActor.run { self.setLoading(true) }
 
-        // 3) Memory pressure check
-        if await isMemoryPressureHigh() {
-            await MainActor.run { self.setError() }
-            return
-        }
-
-
         // 4) Decode off-main with timeout (via utility)
         let url = URL(fileURLWithPath: pathToLoad)
 
@@ -225,24 +218,4 @@ struct PreviewImage: View {
         }
     }
     
-    // MARK: - Memory Pressure Monitoring
-    private func isMemoryPressureHigh() async -> Bool {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                var info = mach_task_basic_info()
-                var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
-                let kerr = withUnsafeMutablePointer(to: &info) {
-                    $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-                        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-                    }
-                }
-                if kerr == KERN_SUCCESS {
-                    let isHighMemory = info.resident_size > MEMORY_PRESSURE_THRESHOLD
-                    continuation.resume(returning: isHighMemory)
-                } else {
-                    continuation.resume(returning: false)
-                }
-            }
-        }
-    }
 }

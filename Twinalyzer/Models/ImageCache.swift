@@ -30,6 +30,7 @@ class ImageCache {
     /// Shared cache instance accessible throughout the app
     /// NSCache is thread-safe and handles memory pressure automatically
     static let shared = NSCache<NSString, NSImage>()
+    private static var memoryMonitorTimer: Timer?
     
     // MARK: - Configuration
     private static let baseCountLimit = 200                   // Base limit for cached images
@@ -70,6 +71,31 @@ class ImageCache {
         }
     }
     
+    // Add method to stop monitoring and cleanup
+    static func stopMonitoringAndCleanup() {
+        memoryMonitorTimer?.invalidate()
+        memoryMonitorTimer = nil
+        shared.removeAllObjects()
+        
+        // Reset to minimal limits
+        shared.countLimit = 5
+        shared.totalCostLimit = 512 * 1024 // 512KB
+    }
+    
+    static func aggressiveClear() {
+        stopMonitoringAndCleanup()
+        
+        // Force garbage collection
+        autoreleasepool {
+            shared.removeAllObjects()
+        }
+        
+        // Restart monitoring with clean slate
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            setupMemoryPressureMonitoring()
+        }
+    }
+    
     /// Configure cache limits based on current memory situation
     /// Nonisolated to be callable from anywhere; hops to main actor internally.
     private nonisolated static func configureCacheLimits() {
@@ -89,9 +115,11 @@ class ImageCache {
 
     /// Periodically re-evaluate limits under possible memory pressure.
     private nonisolated static func setupMemoryPressureMonitoring() {
-        // Timer runs on the current run loop; keep work minimal.
-        Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
-            configureCacheLimits()
+        DispatchQueue.main.async {
+            memoryMonitorTimer?.invalidate() // Clean up any existing timer
+            memoryMonitorTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
+                configureCacheLimits()
+            }
         }
     }
 
@@ -138,33 +166,38 @@ enum ImageProcessingUtilities {
             DispatchQueue.global(qos: qos).sync(execute: work)
         }
 
-        nonisolated static func downsampledCGImage(
-            at url: URL,
-            targetMaxDimension: CGFloat,
-            qos: DispatchQoS.QoSClass = .userInitiated   // <- NEW
-        ) -> CGImage? {
-            return runWithQoS(qos) {                     // <- NEW
-                autoreleasepool {
-                    guard let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                          fileSize > 0, fileSize < 500 * 1024 * 1024 else { return nil }
-                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    nonisolated static func downsampledCGImage(
+        at url: URL,
+        targetMaxDimension: CGFloat,
+        qos: DispatchQoS.QoSClass = .userInitiated
+    ) -> CGImage? {
+        return runWithQoS(qos) {
+            return autoreleasepool {
+                guard let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                      fileSize > 0, fileSize < 500 * 1024 * 1024 else { return nil }
+                
+                guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
 
-                    if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
-                        let w = props[kCGImagePropertyPixelWidth] as? CGFloat ?? 0
-                        let h = props[kCGImagePropertyPixelHeight] as? CGFloat ?? 0
-                        if w > maxImageDimension || h > maxImageDimension { return nil }
-                    }
-
-                    let options: [CFString: Any] = [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceShouldCache: false,
-                        kCGImageSourceThumbnailMaxPixelSize: Int(targetMaxDimension)
-                    ]
-                    return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
+                if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
+                    let w = props[kCGImagePropertyPixelWidth] as? CGFloat ?? 0
+                    let h = props[kCGImagePropertyPixelHeight] as? CGFloat ?? 0
+                    if w > maxImageDimension || h > maxImageDimension { return nil }
                 }
+
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCache: false, // CRITICAL: Don't cache
+                    kCGImageSourceThumbnailMaxPixelSize: Int(targetMaxDimension)
+                ]
+                
+                let image = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
+                
+                // The autoreleasepool will handle cleanup when this block exits
+                return image
             }
         }
+    }
 
     nonisolated static func downsampledCGImageWithTimeout(
         at url: URL,
