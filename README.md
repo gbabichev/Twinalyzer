@@ -32,12 +32,14 @@ Twinalyzer is a SwiftUI app that scans your folders and groups **duplicate** and
 ## 🔍 Troubleshooting & Notes
 
 - **False positives/negatives** → adjust the similarity slider. For highly edited variants, use a slightly **lower** threshold.
+- **RAM** → If you're analyzing large data sets, make sure you have the RAM to handle it. It can easily use over 2GB of RAM. 
 
 ## 🖥️ Install & Minimum Requirements
 
 - macOS 15.0 or later  
 - Universal Binary (not tested on Intel!)
-- ~20 MB free disk space  
+- ~20 MB free disk space
+- ~3GB free RAM for large scans. 
 
 
 ### ⚙️ Installation

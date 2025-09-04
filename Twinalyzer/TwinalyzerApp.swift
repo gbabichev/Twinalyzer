@@ -19,7 +19,7 @@ struct TwinalyzerApp: App {
     @StateObject private var appViewModel = AppViewModel()
     
     var body: some Scene {
-
+        
         WindowGroup {
             ContentView()
                 .environmentObject(appViewModel)
@@ -36,7 +36,7 @@ struct TwinalyzerApp: App {
             ActionsCommands(viewModel: appViewModel)
             SidebarCommands()
         }
-    
+        
         // MARK: - Custom About Window
         Window("About Twinalyzer", id: "AboutWindow") {
             AboutView()
@@ -63,7 +63,7 @@ struct ActionsCommands: Commands {
             }
             .keyboardShortcut("o", modifiers: [.command])
             .disabled(viewModel.isAnyOperationRunning) // FIXED: Use isAnyOperationRunning consistently
-
+            
             Button {
                 viewModel.triggerCSVExport()
             } label: {
@@ -117,7 +117,7 @@ struct ActionsCommands: Commands {
             .keyboardShortcut("l", modifiers: [.command])
             .disabled(viewModel.activeLeafFolders.isEmpty || viewModel.isAnyOperationRunning)
         }
-
+        
         CommandGroup(replacing: .help) {
             Button("Twinalyzer Help") {
                 if let url = URL(string: "https://github.com/gbabichev/") {
@@ -155,7 +155,7 @@ struct ActionsCommands: Commands {
 func requestNotificationAuthIfNeeded() async {
     let center = UNUserNotificationCenter.current()
     let settings = await center.notificationSettings()
-
+    
     switch settings.authorizationStatus {
     case .notDetermined:
         let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false

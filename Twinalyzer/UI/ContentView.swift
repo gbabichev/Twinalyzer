@@ -30,7 +30,7 @@ struct ContentView: View {
     @State var debouncedSelection: Set<String> = []
     @State var selectionDebounceTimer: Timer?
     @FocusState var isTableFocused: Bool
-
+    
     // MARK: - Table State
     @State var tableSelection: Set<String> = []
     @State var sortOrder: [KeyPathComparator<TableRow>] = []
@@ -101,7 +101,7 @@ struct ContentView: View {
             ToolbarItem(placement: .principal){
                 Spacer()
             }
-
+            
             // RIGHT: Primary actions
             ToolbarItemGroup(placement: .primaryAction) {
                 // Clear selection button
@@ -202,11 +202,11 @@ struct ContentView: View {
             sortOrder = []
             vm.updateDisplayedRows(sortOrder: [])
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    if !displayedRows.isEmpty {
-                        tableSelection = [displayedRows.first!.id]
-                        isTableFocused = true
-                    }
+                if !displayedRows.isEmpty {
+                    tableSelection = [displayedRows.first!.id]
+                    isTableFocused = true
                 }
+            }
         }
         .onAppear {
             // Initialize display on first load

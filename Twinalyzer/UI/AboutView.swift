@@ -28,15 +28,15 @@ struct AboutView: View {
                 .frame(width: 120, height: 120)
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .shadow(radius: 10)
-
+            
             // App name displayed prominently
             Text(
                 Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
                 ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
                 ?? "Thumbnailer")
-                .font(.title)
-                .bold()
-
+            .font(.title)
+            .bold()
+            
             // App version fetched dynamically from Info.plist; fallback to "1.0"
             Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (Build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))")
                 .foregroundColor(.secondary)

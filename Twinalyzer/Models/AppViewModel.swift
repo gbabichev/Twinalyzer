@@ -1,10 +1,10 @@
 /*
-
+ 
  AppViewModel.swift - Streamlined
  Twinalyzer
-
+ 
  George Babichev
-
+ 
  */
 
 import SwiftUI
@@ -54,7 +54,7 @@ final class AppViewModel: ObservableObject {
     @Published var representativeImageByFolderStatic: [String: String] = [:]
     @Published var crossFolderDuplicateCountsStatic: [String: Int] = [:]
     @Published var folderDisplayNamesStatic: [String: String] = [:]
-
+    
     // Ordered cross-folder pairs following table reference→match direction
     struct OrderedFolderPair: Identifiable, Hashable {
         let id = UUID()
@@ -63,7 +63,7 @@ final class AppViewModel: ObservableObject {
         let count: Int
     }
     @Published var orderedCrossFolderPairsStatic: [OrderedFolderPair] = []
-
+    
     
     // MARK: - Performance Cache Storage
     private var _tableRowsCache: [TableRow]?
@@ -78,7 +78,7 @@ final class AppViewModel: ObservableObject {
     var activeLeafFolders: [URL] {
         discoveredLeafFolders.filter { !excludedLeafFolders.contains($0) }
     }
-
+    
     var isAnyOperationRunning: Bool {
         isProcessing || isDiscoveringFolders
     }
@@ -216,17 +216,17 @@ final class AppViewModel: ObservableObject {
             rescanSelectedParents(toRescan)
         }
     }
-
+    
     /// Unified entry point for .onDrop
     @MainActor
     func ingestDroppedURLs(_ urls: [URL]) {
         let dirs = FileSystemHelpers.filterDirectories(from: urls).map { $0.standardizedFileURL }
         guard !dirs.isEmpty else { return }
-
+        
         var leaves: [URL] = []
         var parents: [URL] = []
         let ignored = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-
+        
         for dir in dirs {
             if directoryContainsImageFiles(dir, ignoredName: ignored) {
                 leaves.append(dir)
@@ -234,28 +234,28 @@ final class AppViewModel: ObservableObject {
                 parents.append(dir)
             }
         }
-
+        
         if !leaves.isEmpty { addLeafFolders(leaves) }
         if !parents.isEmpty { addParentFolders(parents) }
     }
-
+    
     /// Adds leaf folders directly
     @MainActor
     private func addLeafFolders(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-
+        
         let dropped = urls.map { $0.standardizedFileURL }
         let droppedSet = Set(dropped)
-
+        
         var changed = false
-
+        
         // Un-exclude these leaves
         let beforeExCount = excludedLeafFolders.count
         excludedLeafFolders = excludedLeafFolders.filter { ex in
             !droppedSet.contains(ex.standardizedFileURL)
         }
         if excludedLeafFolders.count != beforeExCount { changed = true }
-
+        
         // Append new leaves
         var seen = Set(discoveredLeafFolders.map { $0.standardizedFileURL })
         for s in dropped {
@@ -265,7 +265,7 @@ final class AppViewModel: ObservableObject {
                 changed = true
             }
         }
-
+        
         if changed {
             reconcileExclusionsWithDiscovered()
         }
@@ -351,7 +351,7 @@ final class AppViewModel: ObservableObject {
         let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         for root in roots {
             if Task.isCancelled { break }
-
+            
             let leafFolders = await findLeafFoldersWithIgnoreFilter(root: root, ignoredName: ignoredName)
             for folder in leafFolders {
                 if discovered.count >= Self.maxDiscoveryBatchSize { break }
@@ -384,7 +384,7 @@ final class AppViewModel: ObservableObject {
         }
         return false
     }
-
+    
     private func findLeafFoldersWithIgnoreFilter(root: URL, ignoredName: String) async -> [URL] {
         return await Task.detached {
             let fm = FileManager.default
@@ -430,7 +430,7 @@ final class AppViewModel: ObservableObject {
     // MARK: - Analysis Operations
     func processImages(progress: @escaping @Sendable (Double) -> Void) {
         guard !isAnyOperationRunning else { return }
-       
+        
         // Ask for notification permission (once). Safe if called repeatedly.
         ensureNotificationAuthorization()
         
@@ -509,22 +509,22 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
-        
+    
     private func buildFolderDuplicatesSnapshot() {
         let rows = tableRows
-
+        
         // Representative image per folder
         var reps: [String: String] = [:]
         // Display names cache
         var displayNames: [String: String] = [:]
-
+        
         for row in rows {
             let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
             let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-
+            
             if reps[refFolder] == nil { reps[refFolder] = row.reference }
             if reps[matchFolder] == nil { reps[matchFolder] = row.similar }
-
+            
             // Cache display names
             if displayNames[refFolder] == nil {
                 displayNames[refFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: refFolder))
@@ -533,7 +533,7 @@ final class AppViewModel: ObservableObject {
                 displayNames[matchFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: matchFolder))
             }
         }
-
+        
         // Cross-folder counts (per folder, bidirectional)
         var folderHitCounts: [String: Int] = [:]
         for row in rows {
@@ -543,7 +543,7 @@ final class AppViewModel: ObservableObject {
             folderHitCounts[ref, default: 0] += 1
             folderHitCounts[match, default: 0] += 1
         }
-
+        
         // Folder relationship clusters (unordered unique pairs)
         var folderPairs: Set<[String]> = []
         for row in rows {
@@ -553,7 +553,7 @@ final class AppViewModel: ObservableObject {
             folderPairs.insert([a, b].sorted())
         }
         let clusters = Array(folderPairs).sorted { $0[0] < $1[0] }
-
+        
         // Directional majority (reference → match) to mirror table direction
         struct DirKey: Hashable { let ref: String; let match: String }
         struct UnKey: Hashable { let a: String; let b: String }
@@ -564,7 +564,7 @@ final class AppViewModel: ObservableObject {
             guard rf != mf else { continue }
             directional[DirKey(ref: rf, match: mf), default: 0] += 1
         }
-
+        
         var totals: [UnKey: (ab: Int, ba: Int)] = [:]
         for (k, c) in directional {
             if k.ref <= k.match {
@@ -579,7 +579,7 @@ final class AppViewModel: ObservableObject {
                 totals[u] = t
             }
         }
-
+        
         var orderedPairs: [OrderedFolderPair] = []
         orderedPairs.reserveCapacity(totals.count)
         for (u, t) in totals {
@@ -597,7 +597,7 @@ final class AppViewModel: ObservableObject {
             if $0.reference != $1.reference { return $0.reference < $1.reference }
             return $0.match < $1.match
         }
-
+        
         // Commit the snapshot
         self.representativeImageByFolderStatic = reps
         self.crossFolderDuplicateCountsStatic = folderHitCounts
@@ -605,7 +605,7 @@ final class AppViewModel: ObservableObject {
         self.folderDisplayNamesStatic = displayNames
         self.orderedCrossFolderPairsStatic = orderedPairs
     }
-
+    
     func cancelAnalysis() {
         cancelAllOperations()
         isProcessing = false
@@ -771,7 +771,7 @@ final class AppViewModel: ObservableObject {
     }
     
     // MARK: - Notifications / Badge
-
+    
     // Ask for notification permission (once). Safe to call repeatedly.
     func ensureNotificationAuthorization() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
@@ -783,7 +783,7 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
-
+    
     /// Post a banner and set a Dock badge only if app is NOT frontmost. Safe to call from any thread.
     func postProcessingDoneNotification(matches: Int) {
         // Check foreground state on the main thread; if the app is frontmost, do nothing.
@@ -795,7 +795,7 @@ final class AppViewModel: ObservableObject {
                 // App is in focus: don't post a notification and don't set a Dock badge.
                 return
             }
-
+            
             // App is NOT frontmost → post a banner + set Dock badge
             let content = UNMutableNotificationContent()
             content.title = "Analysis complete"
@@ -803,48 +803,48 @@ final class AppViewModel: ObservableObject {
             content.sound = .default
             content.badge = NSNumber(value: 1)
             content.threadIdentifier = "twinalyzer.analysis"
-
+            
             let req = UNNotificationRequest(
                 identifier: "analysis-complete-\(UUID().uuidString)",
                 content: content,
                 trigger: nil
             )
-
+            
             UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
-
+            
             NSApp.dockTile.badgeLabel = "1"
         }
     }
-
+    
     // Clear Dock badge + remove our delivered/pending notifications + reset badge count.
     func clearDockBadge() {
         // 1) Dock badge
         DispatchQueue.main.async {
             NSApp.dockTile.badgeLabel = nil
         }
-
+        
         // 2) Delivered notifications (only ours)
         UNUserNotificationCenter.current().getDeliveredNotifications { notes in
             let ids = notes
                 .filter { $0.request.content.threadIdentifier == "twinalyzer.analysis" }
                 .map { $0.request.identifier }
-
+            
             if !ids.isEmpty {
                 UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
             }
-
+            
             // Pending in same thread
             UNUserNotificationCenter.current().getPendingNotificationRequests { reqs in
                 let pendingIDs = reqs
                     .filter { $0.content.threadIdentifier == "twinalyzer.analysis" }
                     .map { $0.identifier }
-
+                
                 if !pendingIDs.isEmpty {
                     UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: pendingIDs)
                 }
             }
         }
-
+        
         // 3) Reset the system badge (macOS 13+)
         UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
     }

@@ -78,7 +78,7 @@ struct PreviewImage: View {
         }
         .accessibilityLabel(Text((path as NSString).lastPathComponent))
     }
-
+    
     // MARK: - UI Components
     private var loadingPlaceholder: some View {
         RoundedRectangle(cornerRadius: max(2, maxDimension * 0.05))
@@ -109,7 +109,7 @@ struct PreviewImage: View {
                 }
             )
     }
-
+    
     // MARK: - Main-actor state setters
     @MainActor private func setImage(_ img: NSImage?, forPath imagePath: String) {
         guard imagePath == self.path else { return }
@@ -129,29 +129,29 @@ struct PreviewImage: View {
         self.isLoading = loading
         if loading { self.hasError = false }
     }
-
+    
     // MARK: - Loading Management
     private func startLoading() {
         guard loadingTask == nil else { return }
-
+        
         // Cancel any existing debounce
         loadingDebounceTask?.cancel()
-
+        
         // Take a snapshot of the current selection BEFORE the debounce
         let capturedPath = self.path
-
+        
         // Debounce ~50ms using structured concurrency
         loadingDebounceTask = Task { [capturedPath] in
             try? await Task.sleep(nanoseconds: 50_000_000)
             guard !Task.isCancelled else { return }
-
+            
             // Hop to the main actor to touch state / call the main-actor method
             await MainActor.run {
                 startActualLoading(path: capturedPath)
             }
         }
     }
-
+    
     // Change signature to accept a snapshot:
     @MainActor
     private func startActualLoading(path: String?) {
@@ -160,7 +160,7 @@ struct PreviewImage: View {
             await load(pathToLoad)
         }
     }
-
+    
     // UPDATE cancelLoading() so it cancels the Task-based debounce:
     private func cancelLoading() {
         loadingDebounceTask?.cancel()
@@ -173,39 +173,39 @@ struct PreviewImage: View {
         hasError = false
         startLoading()
     }
-
+    
     // MARK: - Async Image Loading Pipeline
     private func load(_ pathToLoad: String) async {
         ImageCache.ensureBootstrapped()
         let bucket = ImageProcessingUtilities.cacheBucket(for: maxDimension)
         let key = "\(pathToLoad)::\(bucket)" as NSString
-
+        
         // 1) Cache hit fast path
         if let cached = ImageCache.shared.object(forKey: key) {
             await MainActor.run { self.setImage(cached, forPath: pathToLoad) }
             return
         }
-
-
+        
+        
         // 2) Early cancellation / state
         guard !Task.isCancelled, pathToLoad == self.path else { return }
         await MainActor.run { self.setLoading(true) }
-
+        
         // 4) Decode off-main with timeout (via utility)
         let url = URL(fileURLWithPath: pathToLoad)
-
+        
         let cg = await ImageProcessingUtilities.downsampledCGImageWithTimeout(
             at: url,
             targetMaxDimension: CGFloat(bucket),
             timeout: Self.loadingTimeout,
         )
-
+        
         // 5) Final cancellation / state
         guard !Task.isCancelled, pathToLoad == self.path else {
             await MainActor.run { self.isLoading = false }
             return
         }
-
+        
         // 6) Publish on main + cache
         if let cg {
             await MainActor.run {

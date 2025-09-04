@@ -1,10 +1,10 @@
 /*
-
+ 
  ContentView+Elements.swift - Streamlined
  Twinalyzer
-
+ 
  George Babichev
-
+ 
  */
 
 import SwiftUI
@@ -17,7 +17,7 @@ extension ContentView {
     final class QuickLookPreview: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
         static let shared = QuickLookPreview()
         private var items: [NSURL] = []
-
+        
         func show(urls: [URL]) {
             items = urls.map { $0 as NSURL }
             guard let panel = QLPreviewPanel.shared() else { return }
@@ -27,12 +27,12 @@ extension ContentView {
             panel.reloadData()
             panel.currentPreviewItemIndex = 0
         }
-
+        
         // QLPreviewPanelDataSource
         func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { items.count }
         func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! { items[index] }
     }
-
+    
     @MainActor
     private func openInQuickLook(at path: String) {
         guard FileManager.default.fileExists(atPath: path) else { return }
@@ -60,20 +60,20 @@ extension ContentView {
                         .foregroundStyle(.secondary)
                 }
             }
-
+            
             processingFolderList
                 .frame(width: columnWidth)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
-
+    
     var processingFolderList: some View {
         VStack(spacing: 6) {
             Text(vm.isDiscoveringFolders ? "Scanning Parent Folders..." : "Processing Folders...")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
-
+            
             if vm.allFoldersBeingProcessed.isEmpty {
                 Text("No folders selected.")
                     .foregroundStyle(.secondary)
@@ -92,7 +92,7 @@ extension ContentView {
                             }
                             .buttonStyle(.plain)
                         }
-
+                        
                         ScrollView(.vertical, showsIndicators: false) {
                             LazyVStack(alignment: .center, spacing: 2) {
                                 // Top sentinel flips atTop as you scroll away/return
@@ -101,7 +101,7 @@ extension ContentView {
                                     .id("topSentinel")
                                     .onAppear { atTop = true }
                                     .onDisappear { atTop = false }
-
+                                
                                 ForEach(Array(vm.allFoldersBeingProcessed.enumerated()), id: \.offset) { _, url in
                                     Text(DisplayHelpers.shortDisplayPath(for: url.path))
                                         .font(.body)
@@ -110,7 +110,7 @@ extension ContentView {
                                         .truncationMode(.middle)
                                         .frame(maxWidth: .infinity, alignment: .center)
                                 }
-
+                                
                                 // Bottom sentinel flips atBottom at end
                                 Color.clear
                                     .frame(height: 1)
@@ -122,7 +122,7 @@ extension ContentView {
                         }
                         .frame(width: columnWidth, height: viewportHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
-
+                        
                         // Bottom chevron — only when not at bottom
                         if !atBottom {
                             Button {
@@ -181,7 +181,7 @@ extension ContentView {
     // MARK: - Cross-Folder Duplicates Panel
     var duplicatesFolderPanel: some View {
         let pairs = vm.orderedCrossFolderPairsStatic
-
+        
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Cross-Folder Duplicates")
@@ -195,7 +195,7 @@ extension ContentView {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-
+            
             if pairs.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "folder.badge.questionmark")
@@ -232,15 +232,15 @@ extension ContentView {
                                     }
                                     .buttonStyle(.plain)
                                     .help("Open in Finder")
-
+                                    
                                     Spacer(minLength: 8)
-
+                                    
                                     // Optional strength badge
                                     Text("×\(pair.count)")
                                         .font(.system(size: 11))
                                         .foregroundStyle(.tertiary)
                                 }
-
+                                
                                 // Match row (indented)
                                 HStack {
                                     Button {
@@ -271,7 +271,7 @@ extension ContentView {
                 }
                 .transaction { $0.disablesAnimations = true }
             }
-
+            
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -394,7 +394,7 @@ extension ContentView {
     var macOS15Padding: CGFloat {
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15 ? 1 : 0
     }
-
+    
     var tableView: some View {
         Table(displayedRows, selection: $tableSelection, sortOrder: $sortOrder) {
             
@@ -452,17 +452,17 @@ extension ContentView {
                 ContentUnavailableView("No files",
                                        systemImage: "magnifyingglass",
                                        description: Text("Drop a folder or add files to begin."))
-                    .transition(.opacity)
+                .transition(.opacity)
             }
         }
-
+        
     }
 }
 
 private struct SidebarHoverList: View {
     @ObservedObject var vm: AppViewModel
     @State private var hoveredLeafIdx: Int? = nil
-
+    
     var body: some View {
         List {
             Section(
@@ -486,24 +486,24 @@ private struct SidebarHoverList: View {
                     }
                     return parentOrder == .orderedAscending
                 }
-
+                
                 ForEach(Array(sortedLeaves.enumerated()), id: \.offset) { idx, leafURL in
                     let parentName = leafURL.deletingLastPathComponent().lastPathComponent
                     let leafName = leafURL.lastPathComponent
                     let displayPath = "\(parentName)\\\(leafName)"
-
+                    
                     HStack {
                         Image(systemName: "folder")
                             .imageScale(.medium)
                             .foregroundStyle(.secondary)
-
+                        
                         Text(displayPath)
                             .font(.callout)
                             .lineLimit(1)
                             .truncationMode(.middle)
-
+                        
                         Spacer()
-
+                        
                         if hoveredLeafIdx == idx && !vm.isProcessing {
                             Button {
                                 vm.removeLeafFolder(leafURL)
@@ -539,7 +539,7 @@ private struct SidebarLeafRow: View {
     var body: some View {
         HStack {
             Image(systemName: "folder")
-
+            
             VStack(alignment: .leading, spacing: 2) {
                 Text(leafURL.lastPathComponent)
                     .font(.body)
@@ -580,7 +580,7 @@ private struct SidebarLeafRow: View {
 struct SettingsPanelPopover: View {
     @ObservedObject var vm: AppViewModel
     @FocusState private var textFieldFocused: Bool
-
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Ignored Folder Name")
@@ -604,7 +604,7 @@ struct SettingsPanelPopover: View {
                         .stroke(textFieldFocused ? .blue : .clear, lineWidth: 1)
                 )
                 .focused($textFieldFocused)
-
+                
                 if !vm.ignoredFolderName.isEmpty {
                     Button {
                         DispatchQueue.main.async { vm.ignoredFolderName = "" }
@@ -624,9 +624,9 @@ struct SettingsPanelPopover: View {
                 Text("Will not scan for duplicates between folders. ")
                     .font(.footnote)
             }
-
+            
             Divider()
-
+            
             HStack {
                 Text("Analysis Method")
                     .bold()
@@ -645,7 +645,7 @@ struct SettingsPanelPopover: View {
                 }
             }
             .pickerStyle(.segmented)
-
+            
             Text("Similarity Threshold")
                 .bold()
             Slider(

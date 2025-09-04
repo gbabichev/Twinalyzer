@@ -124,7 +124,7 @@ extension ContentView {
             vm.ingestDroppedURLs(panel.urls)
         }
     }
-
+    
     // MARK: - State Reset
     /// Comprehensive reset of all app state including view model and UI selections
     func clearAll() {

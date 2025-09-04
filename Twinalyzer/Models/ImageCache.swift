@@ -43,7 +43,7 @@ class ImageCache {
         setupMemoryPressureMonitoring()
     }()
     @inline(__always) static func ensureBootstrapped() { _ = _bootstrap }
-
+    
     /// Private initializer to enforce singleton pattern
     /// Configures cache limits during first access to shared instance
     private init() {
@@ -112,7 +112,7 @@ class ImageCache {
             }
         }
     }
-
+    
     /// Periodically re-evaluate limits under possible memory pressure.
     private nonisolated static func setupMemoryPressureMonitoring() {
         DispatchQueue.main.async {
@@ -122,7 +122,7 @@ class ImageCache {
             }
         }
     }
-
+    
     /// Reads current resident memory usage to infer pressure.
     private nonisolated static func isMemoryPressureHigh() async -> Bool {
         await withCheckedContinuation { continuation in
@@ -136,7 +136,7 @@ class ImageCache {
                         task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
                     }
                 }
-
+                
                 if kerr == KERN_SUCCESS {
                     let isHigh = info.resident_size > _ImageCacheConfig.memThreshold()
                     continuation.resume(returning: isHigh)
@@ -160,12 +160,12 @@ enum ImageProcessingUtilities {
     private nonisolated static let maxImageDimension: CGFloat = 8192       // Reject extremely large images
     
     nonisolated static func runWithQoS<T>(
-            _ qos: DispatchQoS.QoSClass,
-            _ work: @escaping () -> T
-        ) -> T {
-            DispatchQueue.global(qos: qos).sync(execute: work)
-        }
-
+        _ qos: DispatchQoS.QoSClass,
+        _ work: @escaping () -> T
+    ) -> T {
+        DispatchQueue.global(qos: qos).sync(execute: work)
+    }
+    
     nonisolated static func downsampledCGImage(
         at url: URL,
         targetMaxDimension: CGFloat,
@@ -177,13 +177,13 @@ enum ImageProcessingUtilities {
                       fileSize > 0, fileSize < 500 * 1024 * 1024 else { return nil }
                 
                 guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-
+                
                 if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
                     let w = props[kCGImagePropertyPixelWidth] as? CGFloat ?? 0
                     let h = props[kCGImagePropertyPixelHeight] as? CGFloat ?? 0
                     if w > maxImageDimension || h > maxImageDimension { return nil }
                 }
-
+                
                 let options: [CFString: Any] = [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceCreateThumbnailWithTransform: true,
@@ -198,14 +198,14 @@ enum ImageProcessingUtilities {
             }
         }
     }
-
+    
     nonisolated static func downsampledCGImageWithTimeout(
         at url: URL,
         targetMaxDimension: CGFloat,
         timeout: TimeInterval? = nil
     ) async -> CGImage? {
         let effectiveTimeout = timeout ?? processingTimeout
-
+        
         return await withTaskGroup(of: CGImage?.self) { group in
             // Run the decode on a lower-QoS GCD thread, not on the caller's task thread.
             group.addTask(priority: .utility) {
@@ -216,13 +216,13 @@ enum ImageProcessingUtilities {
                     }
                 }
             }
-
+            
             // Timeout race
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(effectiveTimeout * 1_000_000_000))
                 return nil
             }
-
+            
             let result = await group.next()
             group.cancelAll()
             return result ?? nil
