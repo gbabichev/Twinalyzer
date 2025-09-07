@@ -58,12 +58,12 @@ struct ContentView: View {
                         .navigationSplitViewColumnWidth(min: 100, ideal:200, max:300)
                 } content: {
                     tableView
+                        .navigationSplitViewColumnWidth(min: 400, ideal:400)
+                        .layoutPriority(1)
                 } detail: {
                     detailSplitView
-                        .navigationSplitViewColumnWidth(min: 200, ideal:400)
+                        .navigationSplitViewColumnWidth(min: 200, ideal:200)
                 }
-                .navigationSplitViewStyle(.prominentDetail)
-                .animation(.none, value: showInspector) // Disable entire split view animation during inspector transitions
             }
         }
         .frame(minWidth: 1200, minHeight: 600)

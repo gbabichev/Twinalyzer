@@ -170,11 +170,11 @@ extension ContentView {
     // MARK: - Detail Split View
     var detailSplitView: some View {
         VSplitView {
-            duplicatesFolderPanel
-                .frame(minHeight: 150, idealHeight: 200)
-            
             previewPanel
                 .frame(minHeight: 200)
+            
+            duplicatesFolderPanel
+                .frame(minHeight: 150, idealHeight: 200)
         }
     }
     
