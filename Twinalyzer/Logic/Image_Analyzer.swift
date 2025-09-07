@@ -61,11 +61,11 @@ enum ImageAnalyzer {
         }
     }
     
-    // MARK: - Deep Feature Analysis (AI-Based)
+    // MARK: - Deep Feature Analysis (AI-Based) - FIXED VERSION
     /// Primary analysis method using Apple's Vision framework for intelligent similarity detection
     /// Can detect similar content even with different crops, lighting, or minor modifications
     /// More computationally intensive but significantly more accurate than hash-based methods
-    /// FIXED: Now only processes the exact folders passed in, no re-discovery
+    /// FIXED: Removed chunking for topLevelOnly = false to ensure all-vs-all comparison
     nonisolated static func analyzeWithDeepFeatures(
         inFolders leafFolders: [URL],
         similarityThreshold: Double,
@@ -74,8 +74,7 @@ enum ImageAnalyzer {
         progress: (@Sendable (Double) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
-    )
-    {
+    ) {
         Task.detached(priority: .utility) {
             guard shouldCancel?() != true else {
                 await MainActor.run { completion([]) }
@@ -85,7 +84,7 @@ enum ImageAnalyzer {
             var results: [ImageComparisonResult] = []
             
             if topLevelOnly {
-                // Process each folder separately in chunks
+                // Process each folder separately (keeps chunking for folder isolation)
                 var totalProcessed = 0
                 let allFiles = await getAllFilesFromExactFolders(
                     folders: leafFolders,
@@ -104,29 +103,25 @@ enum ImageAnalyzer {
                         shouldCancel: shouldCancel
                     )
                     
-                    // Process folder files in chunks
-                    let chunks = files.chunked(into: maxBatchSize)
-                    for chunk in chunks {
-                        if shouldCancel?() == true { break }
-                        
-                        let folderResults = await processImageBatch(
-                            files: chunk,
-                            threshold: similarityThreshold,
-                            processedSoFar: totalProcessed,
-                            totalCount: totalCount,
-                            progress: progress,
-                            shouldCancel: shouldCancel
-                        )
-                        
-                        results.append(contentsOf: folderResults)
-                        totalProcessed += chunk.count
-                        
-                        // Brief pause between chunks for memory management
-                        await Task.yield()
-                    }
+                    // Process entire folder at once (no chunking within folder)
+                    let folderResults = await processImageBatch(
+                        files: files,
+                        threshold: similarityThreshold,
+                        processedSoFar: totalProcessed,
+                        totalCount: totalCount,
+                        progress: progress,
+                        shouldCancel: shouldCancel
+                    )
+                    
+                    results.append(contentsOf: folderResults)
+                    totalProcessed += files.count
+                    
+                    // Brief pause between folders for cooperative multitasking
+                    await Task.yield()
                 }
             } else {
-                // Process all images together in chunks for cross-folder duplicate detection
+                // FIXED: Process ALL images together with NO chunking
+                // This ensures every image is compared against every other image
                 let allFiles = await getAllFilesFromExactFolders(
                     folders: leafFolders,
                     topLevelOnly: false,
@@ -134,28 +129,15 @@ enum ImageAnalyzer {
                     shouldCancel: shouldCancel
                 )
                 
-                // Process ALL files in chunks
-                let chunks = allFiles.chunked(into: maxBatchSize)
-                var totalProcessed = 0
-                
-                for chunk in chunks {
-                    if shouldCancel?() == true { break }
-                    
-                    let chunkResults = await processImageBatch(
-                        files: chunk,
-                        threshold: similarityThreshold,
-                        processedSoFar: totalProcessed,
-                        totalCount: allFiles.count,
-                        progress: progress,
-                        shouldCancel: shouldCancel
-                    )
-                    
-                    results.append(contentsOf: chunkResults)
-                    totalProcessed += chunk.count
-                    
-                    // Brief pause between chunks for memory management
-                    await Task.yield()
-                }
+                // Process ALL files in a single batch for comprehensive comparison
+                results = await processImageBatch(
+                    files: allFiles,
+                    threshold: similarityThreshold,
+                    processedSoFar: 0,
+                    totalCount: allFiles.count,
+                    progress: progress,
+                    shouldCancel: shouldCancel
+                )
             }
             
             // Return results on main thread
