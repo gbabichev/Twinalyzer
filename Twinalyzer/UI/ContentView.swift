@@ -112,35 +112,48 @@ struct ContentView: View {
             
             // RIGHT: Primary actions
             ToolbarItemGroup(placement: .primaryAction) {
+                // Combine both sides
+                let pendingCount = vm.selectedMatchesForDeletion.count + vm.selectedReferencesForDeletion.count
+
                 // Clear selection button
-                if !vm.selectedMatchesForDeletion.isEmpty {
+                if pendingCount > 0 {
                     Button {
+                        // Prefer vm.clearSelection() if you updated it to clear both sets.
+                        // If not, uncomment the 2 lines below:
+                        // vm.selectedReferencesForDeletion.removeAll()
+                        // vm.selectedMatchesForDeletion.removeAll()
                         vm.clearSelection()
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "checkmark.circle.badge.xmark")
-                            Text("Clear")
-                                .font(.caption)
+                            Text("Clear selection")
                         }
                     }
-                    .help("Clear selection (\(vm.selectedMatchesForDeletion.count) item\(vm.selectedMatchesForDeletion.count == 1 ? "" : "s"))")
+                    .help("Clear selection (\(pendingCount) item\(pendingCount == 1 ? "" : "s"))")
                     .disabled(vm.isAnyOperationRunning)
                 }
-                
+
                 // Delete selected button
-                if !vm.selectedMatchesForDeletion.isEmpty {
+                if pendingCount > 0 {
                     Button {
-                        vm.deleteSelectedMatches()
+                        // If you added deletePendingSelections() use that:
+                        // vm.deletePendingSelections()
+                        //
+                        // Otherwise, call what you have today (matches). References will be handled
+                        // once the VM method exists:
+                        vm.deletePendingSelections()
+                        // If your VM already has deleteSelectedReferences(), call it too:
+                        // vm.deleteSelectedReferences()
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "trash")
-                            Text("\(vm.selectedMatchesForDeletion.count)")
-                                .font(.caption)
-                                .fontWeight(.medium)
+                        HStack(spacing: 6) {
+                            Label("Delete selected", systemImage: "trash")
+                            Text("\(pendingCount)")
+                                .font(.caption).fontWeight(.medium)
                         }
                     }
-                    .help("Delete \(vm.selectedMatchesForDeletion.count) selected match\(vm.selectedMatchesForDeletion.count == 1 ? "" : "es")")
+                    .help("Delete \(pendingCount) selected item\(pendingCount == 1 ? "" : "s")")
                     .disabled(vm.isAnyOperationRunning)
+                    .keyboardShortcut(.delete, modifiers: .command)
                 }
                 
                 // Processing state: Show cancel button during analysis
@@ -151,16 +164,18 @@ struct ContentView: View {
                         Label("Cancel", systemImage: "xmark.circle")
                     }
                 } else {
-                    // Ready state
-                    Button {
-                        // Clear selection states when starting new analysis
-                        //tableSelection.removeAll()
-                        //vm.clearSelection()
-                        vm.processImages(progress: { _ in })
-                    } label: {
-                        Label("Analyze", systemImage: "sparkle")
+                    // Ready state (only show if no pending deletions)
+                    if pendingCount == 0 {
+                        Button {
+                            // Clear selection states when starting new analysis
+                            //tableSelection.removeAll()
+                            //vm.clearSelection()
+                            vm.processImages(progress: { _ in })
+                        } label: {
+                            Label("Analyze", systemImage: "sparkle")
+                        }
+                        .disabled(vm.activeLeafFolders.isEmpty)
                     }
-                    .disabled(vm.activeLeafFolders.isEmpty)
                 }
             }
         }

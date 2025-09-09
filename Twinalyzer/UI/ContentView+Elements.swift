@@ -315,10 +315,11 @@ extension ContentView {
                         .padding(.bottom, 10)
                 } else {
                     VStack(spacing: 8) {
-                        if vm.selectedMatchesForDeletion.count > 1 {
-                            Text("\(vm.selectedMatchesForDeletion.count) matches selected")
+                        let pendingCount = vm.selectedMatchesForDeletion.count + vm.selectedReferencesForDeletion.count
+                        if pendingCount > 0 {
+                            Text("\(pendingCount) item\(pendingCount == 1 ? "" : "s") selected")
                                 .foregroundStyle(.secondary)
-                            Text("Press Delete or use toolbar button to delete selected matches")
+                            Text("Press Delete or use toolbar button to apply pending deletions")
                                 .foregroundStyle(.secondary)
                                 .font(.footnote)
                         } else {
@@ -346,7 +347,7 @@ extension ContentView {
         return HStack(alignment: .top, spacing: spacing) {
             // Left side: Reference image
             VStack(spacing: 8) {
-                Text("Reference")
+                Text("Reference" + (vm.selectedReferencesForDeletion.contains(row.id) ? " (to delete)" : ""))
                     .font(.subheadline)
                     .fontWeight(.medium)
 
@@ -375,8 +376,10 @@ extension ContentView {
                 .help("Open in Preview")
 
                 Button("Delete Reference") {
-                    vm.deleteFile(row.reference)
+                    vm.selectedReferencesForDeletion.insert(row.id)
+                    tableSelection = Set([row.id])
                 }
+                .help("Cross out this pair; you can batch delete later")
                 .controlSize(.small)
                 .disabled(vm.isProcessing)
             }
@@ -384,7 +387,7 @@ extension ContentView {
 
             // Right side: Match image
             VStack(spacing: 8) {
-                Text("Match")
+                Text("Match" + (vm.selectedMatchesForDeletion.contains(row.id) ? " (to delete)" : ""))
                     .font(.subheadline)
                     .fontWeight(.medium)
 
@@ -425,8 +428,10 @@ extension ContentView {
                 .help("Open in Preview")
 
                 Button("Delete Match") {
-                    vm.deleteFile(row.similar)
+                    vm.selectedMatchesForDeletion.insert(row.id)
+                    tableSelection = Set([row.id])
                 }
+                .help("Cross out this pair; you can batch delete later")
                 .controlSize(.small)
                 .disabled(vm.isProcessing)
             }
@@ -446,6 +451,7 @@ extension ContentView {
             
             // Reference column with deletion checkbox
             TableColumn("Reference", value: \.referenceShortLower) { row in
+                let crossedRef = vm.selectedReferencesForDeletion.contains(row.id)
                 HStack(spacing: 8) {
                     // Deletion checkbox
                     Button(action: { toggleRowDeletion(row.id) }) {
@@ -460,16 +466,21 @@ extension ContentView {
                         .foregroundStyle(row.isCrossFolder ? .red : .primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .strikethrough(crossedRef)
+                        .opacity(crossedRef ? 0.4 : 1.0)
                 }
             }
             .width(min: 200, ideal: 250)
             
             // Match column
             TableColumn("Match", value: \.similarShortLower) { row in
+                let crossedMatch = vm.selectedMatchesForDeletion.contains(row.id)
                 Text(row.similarShort)
                     .foregroundStyle(row.isCrossFolder ? .red : .primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .strikethrough(crossedMatch)
+                    .opacity(crossedMatch ? 0.4 : 1.0)
             }
             .width(min: 200, ideal: 250)
             
@@ -490,7 +501,6 @@ extension ContentView {
         }
         .navigationTitle("Results (\(displayedRows.count))")
         .focused($isTableFocused)
-        .id(vm.tableReloadToken)  // Force reload on sort changes
         .transaction { $0.disablesAnimations = true }  // Prevent sort animations
         .padding(.top, macOS15Padding)
         .overlay {

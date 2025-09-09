@@ -625,15 +625,35 @@ final class AppViewModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
     
+    private func decodeRowID(_ rowID: String) -> (ref: String, match: String)? {
+        let components = rowID.components(separatedBy: "::")
+        guard components.count == 2 else { return nil }
+        return (ref: components[0], match: components[1])
+    }
+
+    func deleteSelectedReferences() {
+        guard !selectedReferencesForDeletion.isEmpty else { return }
+        let refsToDelete = Array(selectedReferencesForDeletion)
+        selectedReferencesForDeletion.removeAll()
+        let filePaths: [String] = refsToDelete.compactMap { decodeRowID($0)?.ref }
+        Set(filePaths).forEach(deleteFile)
+    }
+    
     func deleteSelectedMatches() {
         guard !selectedMatchesForDeletion.isEmpty else { return }
         let matchesToDelete = Array(selectedMatchesForDeletion)
         selectedMatchesForDeletion.removeAll()
-        let filePaths = matchesToDelete.compactMap { rowID -> String? in
-            let components = rowID.components(separatedBy: "::")
-            return components.count == 2 ? components[1] : nil
-        }
-        filePaths.forEach(deleteFile)
+        let filePaths: [String] = matchesToDelete.compactMap { decodeRowID($0)?.match }
+        Set(filePaths).forEach(deleteFile)
+    }
+    
+    func deletePendingSelections() {
+        var paths: Set<String> = []
+        for id in selectedReferencesForDeletion { if let ref = decodeRowID(id)?.ref { paths.insert(ref) } }
+        for id in selectedMatchesForDeletion   { if let match = decodeRowID(id)?.match { paths.insert(match) } }
+        selectedReferencesForDeletion.removeAll()
+        selectedMatchesForDeletion.removeAll()
+        if !paths.isEmpty { paths.forEach(deleteFile) }
     }
     
     func deleteFile(_ path: String) {
@@ -656,7 +676,11 @@ final class AppViewModel: ObservableObject {
         }
     }
     
+    
     // MARK: - Selection Management
+    @Published var selectedReferencesForDeletion: Set<String> = []
+    var hasSelectedReferences: Bool { !selectedReferencesForDeletion.isEmpty }
+    
     @Published var selectedMatchesForDeletion: Set<String> = []
     var hasSelectedMatches: Bool { !selectedMatchesForDeletion.isEmpty }
     
@@ -678,6 +702,7 @@ final class AppViewModel: ObservableObject {
     }
     
     func clearSelection() {
+        selectedReferencesForDeletion.removeAll()
         selectedMatchesForDeletion.removeAll()
     }
     
@@ -696,6 +721,7 @@ final class AppViewModel: ObservableObject {
         excludedLeafFolders.removeAll()
         discoveredLeafFolders.removeAll(keepingCapacity: false)
         selectedMatchesForDeletion.removeAll(keepingCapacity: false)
+        selectedReferencesForDeletion.removeAll(keepingCapacity: false)
         comparisonResults.removeAll(keepingCapacity: false)
         activeSortedRows.removeAll(keepingCapacity: false)
         
