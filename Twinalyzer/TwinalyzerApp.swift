@@ -40,7 +40,7 @@ struct TwinalyzerApp: App {
         // MARK: - Custom About Window
         Window("About Twinalyzer", id: "AboutWindow") {
             AboutView()
-                .frame(width: 400, height: 400)
+                .frame(width: 450, height: 450)
         }
         .windowResizability(.contentSize) // Makes window non-resizable and size == content
         .defaultSize(width: 400, height: 400)
@@ -85,7 +85,7 @@ struct ActionsCommands: Commands {
                 Button {
                     viewModel.processImages(progress: { _ in })
                 } label: {
-                    Label("Analyze Images", systemImage: "wand.and.stars")
+                    Label("Analyze Images", systemImage: "sparkle")
                 }
                 .keyboardShortcut("p", modifiers: [.command])
                 .disabled(viewModel.activeLeafFolders.isEmpty)

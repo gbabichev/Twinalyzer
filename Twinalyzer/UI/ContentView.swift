@@ -102,6 +102,14 @@ struct ContentView: View {
                 Spacer()
             }
             
+            // In the toolbar section, add this new ToolbarItem
+            ToolbarItem(placement: .status) {
+                if !vm.isProcessing && !vm.comparisonResults.isEmpty {
+                    Text("Found \(displayedRows.count) duplicates")
+                        .padding(.horizontal)
+                }
+            }
+            
             // RIGHT: Primary actions
             ToolbarItemGroup(placement: .primaryAction) {
                 // Clear selection button
@@ -150,7 +158,7 @@ struct ContentView: View {
                         //vm.clearSelection()
                         vm.processImages(progress: { _ in })
                     } label: {
-                        Label("Analyze", systemImage: "wand.and.stars")
+                        Label("Analyze", systemImage: "sparkle")
                     }
                     .disabled(vm.activeLeafFolders.isEmpty)
                 }

@@ -35,6 +35,33 @@ extension ContentView {
     
     @MainActor
     private func openInQuickLook(at path: String) {
+        // If we know the currently selected row, provide both images to Quick Look
+        // so the user can use arrow keys to move between them.
+        if let row = selectedRow {
+            let refURL = URL(fileURLWithPath: row.reference)
+            let matchURL = URL(fileURLWithPath: row.similar)
+            let fm = FileManager.default
+            let hasRef = fm.fileExists(atPath: refURL.path)
+            let hasMatch = fm.fileExists(atPath: matchURL.path)
+            var urls: [URL] = []
+
+            if path == refURL.path {
+                if hasRef { urls.append(refURL) }
+                if hasMatch { urls.append(matchURL) }
+            } else if path == matchURL.path {
+                if hasMatch { urls.append(matchURL) }
+                if hasRef { urls.append(refURL) }
+            } else {
+                // Fallback if the path doesn't match the current row (shouldn't happen)
+                if fm.fileExists(atPath: path) { urls = [URL(fileURLWithPath: path)] }
+            }
+
+            guard !urls.isEmpty else { return }
+            QuickLookPreview.shared.show(urls: urls)
+            return
+        }
+
+        // Fallback: just preview the single item
         guard FileManager.default.fileExists(atPath: path) else { return }
         QuickLookPreview.shared.show(urls: [URL(fileURLWithPath: path)])
     }
@@ -283,6 +310,9 @@ extension ContentView {
             VStack {
                 if let row = selectedRow, !vm.tableRows.isEmpty {
                     renderPreview(for: row, size: geometry.size)
+                    Text("💡 Tip: Click a preview image to open in Preview. Click the path name to open the folder.")
+                        .font(.footnote)
+                        .padding(.bottom, 10)
                 } else {
                     VStack(spacing: 8) {
                         if vm.selectedMatchesForDeletion.count > 1 {
@@ -310,6 +340,8 @@ extension ContentView {
         let twoColumnWidth = max(0, size.width - spacing - inset * 2)
         let singleColumn = twoColumnWidth / 2
         let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
+        let refDir = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+        let matchDir = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
         
         return HStack(alignment: .top, spacing: spacing) {
             // Left side: Reference image
@@ -317,13 +349,20 @@ extension ContentView {
                 Text("Reference")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                
-                Text(row.referenceShort)
-                    .font(.caption)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.center)
-                
+
+                Button {
+                    vm.openFolderInFinder(refDir)
+                } label: {
+                    Text(row.referenceShort)
+                        .font(.caption)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .multilineTextAlignment(.center)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+                .help("Reveal containing folder in Finder")
+
                 Button {
                     openInQuickLook(at: row.reference)
                 } label: {
@@ -334,7 +373,7 @@ extension ContentView {
                 }
                 .buttonStyle(.plain)
                 .help("Open in Preview")
-                
+
                 Button("Delete Reference") {
                     vm.deleteFile(row.reference)
                 }
@@ -342,20 +381,27 @@ extension ContentView {
                 .disabled(vm.isProcessing)
             }
             .frame(maxWidth: max(100, singleColumn))
-            
+
             // Right side: Match image
             VStack(spacing: 8) {
                 Text("Match")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                
-                Text(row.similarShort)
-                    .font(.caption)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(row.isCrossFolder ? .red : .primary)
-                
+
+                Button {
+                    vm.openFolderInFinder(matchDir)
+                } label: {
+                    Text(row.similarShort)
+                        .font(.caption)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(row.isCrossFolder ? .red : .black)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+                .help("Reveal containing folder in Finder")
+
                 Button {
                     openInQuickLook(at: row.similar)
                 } label: {
@@ -377,7 +423,7 @@ extension ContentView {
                 }
                 .buttonStyle(.plain)
                 .help("Open in Preview")
-                
+
                 Button("Delete Match") {
                     vm.deleteFile(row.similar)
                 }
