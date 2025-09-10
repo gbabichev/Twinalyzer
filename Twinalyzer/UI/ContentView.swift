@@ -47,6 +47,28 @@ struct ContentView: View {
         return displayedRows.first(where: { $0.id == firstID })
     }
     
+    
+    @MainActor
+    private func openPairInQuickLook(_ row: TableRow, referenceFirst: Bool = true) {
+        let refURL = URL(fileURLWithPath: row.reference)
+        let matchURL = URL(fileURLWithPath: row.similar)
+        let fm = FileManager.default
+        let hasRef = fm.fileExists(atPath: refURL.path)
+        let hasMatch = fm.fileExists(atPath: matchURL.path)
+        var urls: [URL] = []
+
+        if referenceFirst {
+            if hasRef { urls.append(refURL) }
+            if hasMatch { urls.append(matchURL) }
+        } else {
+            if hasMatch { urls.append(matchURL) }
+            if hasRef { urls.append(refURL) }
+        }
+
+        guard !urls.isEmpty else { return }
+        QuickLookPreview.shared.show(urls: urls)
+    }
+    
     //MARK: - Main UI
     var body: some View {
         Group {
@@ -153,7 +175,6 @@ struct ContentView: View {
                     }
                     .help("Delete \(pendingCount) selected item\(pendingCount == 1 ? "" : "s")")
                     .disabled(vm.isAnyOperationRunning)
-                    .keyboardShortcut(.delete, modifiers: .command)
                 }
                 
                 // Processing state: Show cancel button during analysis
@@ -180,11 +201,46 @@ struct ContentView: View {
             }
         }
         // MARK: - Keyboard Shortcuts
-        .onKeyPress(.space) {
-            guard !tableSelection.isEmpty else { return .handled }
+        .onKeyPress("z") {
+            let targets = !debouncedSelection.isEmpty ? debouncedSelection : tableSelection
+            guard !targets.isEmpty else { return .handled }
             DispatchQueue.main.async {
-                vm.toggleSelection(for: tableSelection)
+                for id in targets {
+                    if vm.selectedReferencesForDeletion.contains(id) {
+                        vm.selectedReferencesForDeletion.remove(id)
+                    } else {
+                        vm.selectedReferencesForDeletion.insert(id)
+                    }
+                }
             }
+            return .handled
+        }
+        .onKeyPress("x") {
+            let targets = !debouncedSelection.isEmpty ? debouncedSelection : tableSelection
+            guard !targets.isEmpty else { return .handled }
+            DispatchQueue.main.async {
+                for id in targets {
+                    if vm.selectedMatchesForDeletion.contains(id) {
+                        vm.selectedMatchesForDeletion.remove(id)
+                    } else {
+                        vm.selectedMatchesForDeletion.insert(id)
+                    }
+                }
+            }
+            return .handled
+        }
+        .onKeyPress(.space) {
+            // Prefer the already-computed selectedRow to avoid extra lookup
+            if let row = selectedRow {
+                openPairInQuickLook(row, referenceFirst: true)
+                return .handled
+            }
+            // Fallback to current selection and resolve within displayedRows
+            let targets = !debouncedSelection.isEmpty ? debouncedSelection : tableSelection
+            guard let id = targets.first,
+                  let row = displayedRows.first(where: { $0.id == id })
+            else { return .handled }
+            openPairInQuickLook(row, referenceFirst: true)
             return .handled
         }
         // MARK: - Drag and Drop Support
