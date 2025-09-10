@@ -354,12 +354,18 @@ extension ContentView {
                 Button {
                     vm.openFolderInFinder(refDir)
                 } label: {
-                    Text(row.referenceShort)
-                        .font(.caption)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .multilineTextAlignment(.center)
-                        .underline()
+                    Label {
+                        Text(row.referenceShort)
+                            .font(.caption)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .multilineTextAlignment(.center)
+                            .underline()
+                    } icon: {
+                        Image(systemName: "folder")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("Reveal containing folder in Finder")
@@ -390,17 +396,23 @@ extension ContentView {
                 Text("Match" + (vm.selectedMatchesForDeletion.contains(row.id) ? " (to delete)" : ""))
                     .font(.subheadline)
                     .fontWeight(.medium)
-
+                
                 Button {
                     vm.openFolderInFinder(matchDir)
                 } label: {
-                    Text(row.similarShort)
-                        .font(.caption)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(row.isCrossFolder ? .red : .black)
-                        .underline()
+                    Label {
+                        Text(row.similarShort)
+                            .font(.caption)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(row.isCrossFolder ? .red : .black)
+                            .underline()
+                    } icon: {
+                        Image(systemName: "folder")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("Reveal containing folder in Finder")
@@ -636,6 +648,8 @@ private struct SidebarLeafRow: View {
 struct SettingsPanelPopover: View {
     @ObservedObject var vm: AppViewModel
     @FocusState private var textFieldFocused: Bool
+    @State private var localSimilarity: Double = 0.8
+    @State private var similarityDebounce: DispatchWorkItem?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -705,13 +719,30 @@ struct SettingsPanelPopover: View {
             Text("Similarity Threshold")
                 .bold()
             Slider(
-                value: Binding(
-                    get: { vm.similarityThreshold },
-                    set: { newValue in DispatchQueue.main.async { vm.similarityThreshold = newValue } }
-                ),
+                value: $localSimilarity,
                 in: 0.5...1.0,
-                step: 0.01
+                step: 0.01,
+                onEditingChanged: { editing in
+                    // When the user lets go, commit immediately
+                    if !editing {
+                        similarityDebounce?.cancel()
+                        DispatchQueue.main.async { vm.similarityThreshold = localSimilarity }
+                    }
+                }
             )
+            .onChange(of: localSimilarity) { _, newValue in
+                // Debounce updates while the knob is moving to avoid recomputing heavy results on every tick
+                similarityDebounce?.cancel()
+                let work = DispatchWorkItem {
+                    vm.similarityThreshold = newValue
+                }
+                similarityDebounce = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+            }
+            .onAppear {
+                // Initialize local slider state from the model
+                localSimilarity = vm.similarityThreshold
+            }
             Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
