@@ -7,10 +7,26 @@
  
  */
 
+
 import SwiftUI
 import AppKit
 import ImageIO
 import UniformTypeIdentifiers
+import Quartz
+
+// MARK: - QuickLookPreview Navigation Extension
+extension ContentView.QuickLookPreview {
+    func goPrevious() {
+        guard let panel = QLPreviewPanel.shared(), panel.isVisible else { return }
+        let prev = max(0, panel.currentPreviewItemIndex - 1)
+        if prev != panel.currentPreviewItemIndex { panel.currentPreviewItemIndex = prev }
+    }
+    func goNext() {
+        guard let panel = QLPreviewPanel.shared(), panel.isVisible else { return }
+        let next = panel.currentPreviewItemIndex + 1
+        panel.currentPreviewItemIndex = next
+    }
+}
 
 struct ContentView: View {
     
@@ -47,6 +63,19 @@ struct ContentView: View {
         return displayedRows.first(where: { $0.id == firstID })
     }
     
+    // MARK: - Quick Look Navigation (without taking focus)
+    private func quickLookGoPrevious() { QuickLookPreview.shared.goPrevious() }
+    private func quickLookGoNext() { QuickLookPreview.shared.goNext() }
+
+    // MARK: - Helper to refocus main window after Quick Look
+    private func refocusPrimaryWindow() {
+        // Bring a non-panel window back to key status so table keeps focus
+        if let win = NSApp.windows.first(where: { !($0 is NSPanel) && $0.isVisible }) {
+            win.makeKeyAndOrderFront(nil)
+        }
+        // Reassert SwiftUI table focus if applicable
+        isTableFocused = true
+    }
     
     @MainActor
     private func openPairInQuickLook(_ row: TableRow, referenceFirst: Bool = true) {
@@ -201,6 +230,14 @@ struct ContentView: View {
             }
         }
         // MARK: - Keyboard Shortcuts
+        .onKeyPress(.leftArrow) {
+            quickLookGoPrevious()
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            quickLookGoNext()
+            return .handled
+        }
         .onKeyPress("z") {
             let targets = !debouncedSelection.isEmpty ? debouncedSelection : tableSelection
             guard !targets.isEmpty else { return .handled }
@@ -233,6 +270,7 @@ struct ContentView: View {
             // Prefer the already-computed selectedRow to avoid extra lookup
             if let row = selectedRow {
                 openPairInQuickLook(row, referenceFirst: true)
+                refocusPrimaryWindow()
                 return .handled
             }
             // Fallback to current selection and resolve within displayedRows
@@ -241,6 +279,7 @@ struct ContentView: View {
                   let row = displayedRows.first(where: { $0.id == id })
             else { return .handled }
             openPairInQuickLook(row, referenceFirst: true)
+            refocusPrimaryWindow()
             return .handled
         }
         // MARK: - Drag and Drop Support

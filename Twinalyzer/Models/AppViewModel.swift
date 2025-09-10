@@ -639,13 +639,13 @@ final class AppViewModel: ObservableObject {
         Set(filePaths).forEach(deleteFile)
     }
     
-    func deleteSelectedMatches() {
-        guard !selectedMatchesForDeletion.isEmpty else { return }
-        let matchesToDelete = Array(selectedMatchesForDeletion)
-        selectedMatchesForDeletion.removeAll()
-        let filePaths: [String] = matchesToDelete.compactMap { decodeRowID($0)?.match }
-        Set(filePaths).forEach(deleteFile)
-    }
+//    func deleteSelectedMatches() {
+//        guard !selectedMatchesForDeletion.isEmpty else { return }
+//        let matchesToDelete = Array(selectedMatchesForDeletion)
+//        selectedMatchesForDeletion.removeAll()
+//        let filePaths: [String] = matchesToDelete.compactMap { decodeRowID($0)?.match }
+//        Set(filePaths).forEach(deleteFile)
+//    }
     
     func deletePendingSelections() {
         var paths: Set<String> = []

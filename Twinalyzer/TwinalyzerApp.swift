@@ -94,7 +94,7 @@ struct ActionsCommands: Commands {
             Divider()
             
             Button {
-                viewModel.deleteSelectedMatches()
+                viewModel.deletePendingSelections()
             } label: {
                 Label("Delete Matches", systemImage: "trash")
             }
