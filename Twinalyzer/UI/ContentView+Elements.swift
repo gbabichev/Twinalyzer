@@ -461,6 +461,23 @@ extension ContentView {
     var tableView: some View {
         Table(displayedRows, selection: $tableSelection, sortOrder: $sortOrder) {
             
+            // Row index column (narrow)
+            TableColumn("#") { row in
+                if let idx = displayedRows.firstIndex(where: { $0.id == row.id }) {
+                    Text("\(idx + 1)")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                } else {
+                    Text("")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+            .width(36)
+                        
+            
             // Reference column with deletion checkbox
             TableColumn("Reference", value: \.referenceShortLower) { row in
                 let crossedRef = vm.selectedReferencesForDeletion.contains(row.id)
