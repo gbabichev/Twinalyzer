@@ -101,6 +101,11 @@ extension ContentView {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
             
+            Text("💡 99% takes a while sometimes... don't be alarmed by the beachball!")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+            
             if vm.allFoldersBeingProcessed.isEmpty {
                 Text("No folders selected.")
                     .foregroundStyle(.secondary)
@@ -340,7 +345,7 @@ extension ContentView {
         let inset: CGFloat = 16
         let twoColumnWidth = max(0, size.width - spacing - inset * 2)
         let singleColumn = twoColumnWidth / 2
-        let maxDim = max(80, min(singleColumn - 40, size.height - 120, 400))
+        let maxDim = max(80, min(singleColumn - 40, size.height - 120))
         let refDir = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
         let matchDir = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
         
