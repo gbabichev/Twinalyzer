@@ -206,108 +206,138 @@ extension ContentView {
                 .frame(minHeight: 200)
             
             duplicatesFolderPanel
-                .frame(minHeight: 150, idealHeight: 200)
         }
     }
     
     // MARK: - Cross-Folder Duplicates Panel
     var duplicatesFolderPanel: some View {
-        let pairs = vm.orderedCrossFolderPairsStatic
-        
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        DuplicatesFolderPanel(vm: vm)
+    }
+
+private struct DuplicatesFolderPanel: View {
+    @ObservedObject var vm: AppViewModel
+    @State private var isMinimized: Bool = false
+
+    var body: some View {
+        // Use a VStack that can collapse its content while keeping a small header visible
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
                 Text("Cross-Folder Duplicates")
                     .font(.headline).fontWeight(.semibold)
                 Spacer()
-                if !pairs.isEmpty {
-                    Text("\(pairs.count) relationship\(pairs.count == 1 ? "" : "s")")
+                if !vm.orderedCrossFolderPairsStatic.isEmpty && !isMinimized {
+                    Text("\(vm.orderedCrossFolderPairsStatic.count) relationship\(vm.orderedCrossFolderPairsStatic.count == 1 ? "" : "s")")
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 }
+                Button(action: { withAnimation(.easeInOut) { isMinimized.toggle() } }) {
+                    Image(systemName: isMinimized ? "chevron.up" : "chevron.down")
+                        .padding(.trailing, 10)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(isMinimized ? "Expand" : "Minimize")
+                }
+                .buttonStyle(.plain)
+                .help(isMinimized ? "Expand" : "Minimize")
             }
             .padding(.horizontal, 12)
-            .padding(.top, 8)
-            
-            if pairs.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "folder.badge.questionmark")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.secondary)
-                    Text("No cross-folder duplicate relationships found.")
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                    Text("Run an analysis to discover duplicates between different folders.")
-                        .foregroundStyle(.tertiary)
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(pairs) { pair in
-                            VStack(alignment: .leading, spacing: 2) {
-                                // Reference row
-                                HStack {
-                                    Button {
-                                        vm.openFolderInFinder(pair.reference)
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "folder")
-                                                .foregroundStyle(.secondary)
-                                            Text(vm.folderDisplayNamesStatic[pair.reference] ?? pair.reference)
-                                                .font(.system(size: 13, weight: .medium))
-                                                .lineLimit(1)
-                                                .truncationMode(.middle)
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Open in Finder")
-                                    
-                                    Spacer(minLength: 8)
-                                    
-                                    // Optional strength badge
-                                    Text("×\(pair.count)")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                
-                                // Match row (indented)
-                                HStack {
-                                    Button {
-                                        vm.openFolderInFinder(pair.match)
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "folder")
-                                                .foregroundStyle(.secondary)
-                                            Text(vm.folderDisplayNamesStatic[pair.match] ?? pair.match)
-                                                .font(.system(size: 12))
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                                .truncationMode(.middle)
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Open in Finder")
-                                }
-                                .padding(.leading, 16)
-                            }
-                            Divider()
-                                .contentShape(Rectangle())
-                                .padding(.vertical, 2)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+
+            // Content (collapsible)
+            Group {
+                let pairs = vm.orderedCrossFolderPairsStatic
+                if isMinimized {
+                    // Empty, but keep a thin spacer to avoid zero-height flicker
+                    Spacer(minLength: 0)
+                } else {
+                    if pairs.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "folder.badge.questionmark")
+                                .font(.system(size: 24))
+                                .foregroundStyle(.secondary)
+                            Text("No cross-folder duplicate relationships found.")
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                                .multilineTextAlignment(.center)
+                            Text("Run an analysis to discover duplicates between different folders.")
+                                .foregroundStyle(.tertiary)
+                                .font(.caption)
+                                .multilineTextAlignment(.center)
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.vertical, 8)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 8) {
+                                ForEach(pairs) { pair in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        // Reference row
+                                        HStack {
+                                            Button {
+                                                vm.openFolderInFinder(pair.reference)
+                                            } label: {
+                                                HStack(spacing: 6) {
+                                                    Image(systemName: "folder")
+                                                        .foregroundStyle(.secondary)
+                                                    Text(vm.folderDisplayNamesStatic[pair.reference] ?? pair.reference)
+                                                        .font(.system(size: 13, weight: .medium))
+                                                        .lineLimit(1)
+                                                        .truncationMode(.middle)
+                                                }
+                                            }
+                                            .buttonStyle(.plain)
+                                            .help("Open in Finder")
+
+                                            Spacer(minLength: 8)
+
+                                            // Optional strength badge
+                                            Text("×\(pair.count)")
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(.tertiary)
+                                        }
+
+                                        // Match row (indented)
+                                        HStack {
+                                            Button {
+                                                vm.openFolderInFinder(pair.match)
+                                            } label: {
+                                                HStack(spacing: 6) {
+                                                    Image(systemName: "folder")
+                                                        .foregroundStyle(.secondary)
+                                                    Text(vm.folderDisplayNamesStatic[pair.match] ?? pair.match)
+                                                        .font(.system(size: 12))
+                                                        .foregroundStyle(.secondary)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.middle)
+                                                }
+                                            }
+                                            .buttonStyle(.plain)
+                                            .help("Open in Finder")
+                                        }
+                                        .padding(.leading, 16)
+                                    }
+                                    Divider()
+                                        .contentShape(Rectangle())
+                                        .padding(.vertical, 2)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                        }
+                        .transaction { $0.disablesAnimations = true }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
                 }
-                .transaction { $0.disablesAnimations = true }
             }
-            
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, maxHeight: isMinimized ? 0 : .infinity)
+            .clipped()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // When minimized, suggest a compact height to the split view
+        .frame(minHeight: isMinimized ? 32 : 150, idealHeight: isMinimized ? 36 : 200)
+        .animation(.easeInOut(duration: 0.2), value: isMinimized)
     }
+}
     
     // MARK: - Preview Panel
     var previewPanel: some View {
