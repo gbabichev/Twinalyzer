@@ -371,14 +371,21 @@ final class AppViewModel: ObservableObject {
             includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return false }
+        
         let imageExtensions: Set<String> = ["jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"]
+        
         for item in contents {
             if let rv = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]) {
                 if rv.isDirectory == true {
+                    // Only ignore subdirectories with the ignored name, not the directory being checked itself
                     let subfolderName = item.lastPathComponent.lowercased()
-                    if !ignoredName.isEmpty && subfolderName == ignoredName { continue }
+                    if !ignoredName.isEmpty && subfolderName == ignoredName {
+                        continue // Skip this subdirectory
+                    }
                 } else if rv.isRegularFile == true {
-                    if imageExtensions.contains(item.pathExtension.lowercased()) { return true }
+                    if imageExtensions.contains(item.pathExtension.lowercased()) {
+                        return true
+                    }
                 }
             }
         }
@@ -389,36 +396,56 @@ final class AppViewModel: ObservableObject {
         return await Task.detached {
             let fm = FileManager.default
             var leafFolders: [URL] = []
-            func findLeafFolders(in directory: URL) {
-                let folderName = directory.lastPathComponent.lowercased()
-                if !ignoredName.isEmpty && folderName == ignoredName { return }
+            
+            func findLeafFolders(in directory: URL, isRootLevel: Bool = false) {
+                // Only apply ignored folder filter to non-root directories
+                if !isRootLevel {
+                    let folderName = directory.lastPathComponent.lowercased()
+                    if !ignoredName.isEmpty && folderName == ignoredName {
+                        return // Skip this directory entirely
+                    }
+                }
+                
                 guard let contents = try? fm.contentsOfDirectory(
                     at: directory,
                     includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
                     options: [.skipsHiddenFiles]
                 ) else { return }
+                
                 var subdirectories: [URL] = []
                 var hasImageFiles = false
+                
                 for item in contents {
                     if let resourceValues = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]) {
                         if resourceValues.isDirectory == true {
                             let subfolderName = item.lastPathComponent.lowercased()
+                            // Apply ignore filter to subdirectories
                             if ignoredName.isEmpty || subfolderName != ignoredName {
                                 subdirectories.append(item)
                             }
                         } else if resourceValues.isRegularFile == true {
                             let ext = item.pathExtension.lowercased()
                             let imageExtensions: Set<String> = ["jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"]
-                            if imageExtensions.contains(ext) { hasImageFiles = true }
+                            if imageExtensions.contains(ext) {
+                                hasImageFiles = true
+                            }
                         }
                     }
                 }
-                if hasImageFiles { leafFolders.append(directory) }
+                
+                if hasImageFiles {
+                    leafFolders.append(directory)
+                }
+                
                 if !subdirectories.isEmpty {
-                    for subdir in subdirectories { findLeafFolders(in: subdir) }
+                    for subdir in subdirectories {
+                        findLeafFolders(in: subdir, isRootLevel: false)
+                    }
                 }
             }
-            findLeafFolders(in: root)
+            
+            // Start the search at root level (don't apply ignore filter to root)
+            findLeafFolders(in: root, isRootLevel: true)
             return leafFolders
         }.value
     }

@@ -591,11 +591,10 @@ enum ImageAnalyzer {
     // MARK: - Enhanced File Discovery and Filtering
     
     /// ENHANCED: Async version with chunked processing and ignored folder filtering
-    /// FIXED: Now respects topLevelOnly to prevent discovering new subfolders during analysis
     private nonisolated static func allImageFilesAsync(
         in directory: URL,
         ignoredFolderName: String = "",
-        topLevelOnly: Bool = false,  // FIXED: Added topLevelOnly parameter
+        topLevelOnly: Bool = false,
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [URL] {
         // FIXED: If topLevelOnly is true, delegate to the top-level method
@@ -624,14 +623,21 @@ enum ImageAnalyzer {
                 count += 1
                 if count % fileSystemChunkSize == 0 { await Task.yield() }
                 
-                // FIXED: Check if this file is in an ignored folder path
+                // FIXED: Only check for ignored folder in path components that are subdirectories
+                // of the root directory being scanned, not the root directory itself
                 if !ignoredName.isEmpty {
-                    let pathComponents = url.pathComponents
-                    let containsIgnoredFolder = pathComponents.contains { component in
-                        component.lowercased() == ignoredName
-                    }
-                    if containsIgnoredFolder {
-                        continue // Skip files in ignored folders
+                    let rootComponents = directory.pathComponents
+                    let fileComponents = url.pathComponents
+                    
+                    // Only check components that come after the root directory
+                    if fileComponents.count > rootComponents.count {
+                        let subdirComponents = Array(fileComponents[rootComponents.count...])
+                        let containsIgnoredFolder = subdirComponents.contains { component in
+                            component.lowercased() == ignoredName
+                        }
+                        if containsIgnoredFolder {
+                            continue // Skip files in ignored subfolders
+                        }
                     }
                 }
                 
