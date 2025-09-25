@@ -230,15 +230,19 @@ struct ContentView: View {
             }
         }
         // MARK: - Keyboard Shortcuts
+        // MARK: - Keyboard Shortcuts - Fixed to respect popover state
         .onKeyPress(.leftArrow) {
+            guard !showSettingsPopover else { return .ignored }
             quickLookGoPrevious()
             return .handled
         }
         .onKeyPress(.rightArrow) {
+            guard !showSettingsPopover else { return .ignored }
             quickLookGoNext()
             return .handled
         }
         .onKeyPress("z") {
+            guard !showSettingsPopover else { return .ignored }
             let targets = !debouncedSelection.isEmpty ? debouncedSelection : tableSelection
             guard !targets.isEmpty else { return .handled }
             DispatchQueue.main.async {
@@ -253,6 +257,7 @@ struct ContentView: View {
             return .handled
         }
         .onKeyPress("x") {
+            guard !showSettingsPopover else { return .ignored }
             let targets = !debouncedSelection.isEmpty ? debouncedSelection : tableSelection
             guard !targets.isEmpty else { return .handled }
             DispatchQueue.main.async {
@@ -267,6 +272,7 @@ struct ContentView: View {
             return .handled
         }
         .onKeyPress(.space) {
+            guard !showSettingsPopover else { return .ignored }
             // Prefer the already-computed selectedRow to avoid extra lookup
             if let row = selectedRow {
                 openPairInQuickLook(row, referenceFirst: true)
@@ -282,6 +288,7 @@ struct ContentView: View {
             refocusPrimaryWindow()
             return .handled
         }
+        
         // MARK: - Drag and Drop Support
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             Task {
