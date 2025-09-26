@@ -345,5 +345,13 @@ struct ContentView: View {
         ) { result in
             vm.handleCSVExportResult(result)
         }
+        .alert("No Results Found", isPresented: $vm.showNoResultsAlert) {
+            Button("OK") { }
+            Button("Adjust Settings") {
+                showSettingsPopover = true
+            }
+        } message: {
+            Text(vm.noResultsAlertMessage)
+        }
     }
 }

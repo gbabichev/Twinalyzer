@@ -18,6 +18,10 @@ import UserNotifications
 @MainActor
 final class AppViewModel: ObservableObject {
     
+    // MARK: - No Results Popup
+    @Published var showNoResultsAlert = false
+    @Published var noResultsAlertMessage = ""
+    
     // MARK: - CSV Export
     @Published var isExportingCSV = false
     @Published var csvDocument: CSVDocument? = nil
@@ -526,13 +530,18 @@ final class AppViewModel: ObservableObject {
                     self.updateDisplayedRows(sortOrder: [])
                     self.buildFolderDuplicatesSnapshot()
                     
+                    // Check if no results were found and show alert
+                    let matches = self.tableRows.count
+                    if matches == 0 {
+                        self.showNoResultsAlert = true
+                        self.noResultsAlertMessage = "No similar images were found with the current similarity threshold (\(Int(self.similarityThreshold * 100))%). Try lowering the threshold or selecting different folders."
+                    }
+                    
+                    self.postProcessingDoneNotification(matches: matches)
                 }
                 self.processingProgress = nil
                 self.isProcessing = false
                 self.analysisTask = nil
-                
-                let matches = self.tableRows.count
-                self.postProcessingDoneNotification(matches: matches)
             }
         }
     }
