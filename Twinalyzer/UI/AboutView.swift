@@ -68,8 +68,12 @@ struct AboutView: View {
             Text("© \(String(Calendar.current.component(.year, from: Date()))) George Babichev")
                 .font(.footnote)
                 .foregroundColor(.secondary)
-            // Link to the author's GitHub profile for project reference
-            Link("GitHub", destination: URL(string: "https://github.com/gbabichev")!)
+
+            Link("GitHub", destination: URL(string: "https://github.com/gbabichev/Twinalyzer/tree/main")!)
+                .font(.footnote)
+                .foregroundColor(.accentColor)
+            
+            Link("George Babichev", destination: URL(string: "https://georgebabichev.com")!)
                 .font(.footnote)
                 .foregroundColor(.accentColor)
         }

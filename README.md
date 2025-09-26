@@ -1,12 +1,20 @@
-# Twinalyzer – Find Duplicate & Similar Photos
+<div align="center">
+
+<picture>
+  <source srcset="Documentation/icon-dark.png" media="(prefers-color-scheme: dark)">
+  <source srcset="Documentation/icon-light.png" media="(prefers-color-scheme: light)">
+  <img src="Documentation/icon-light.png" alt="App Icon" width="100">
+</picture>
+<br/><br/>
 
 Twinalyzer is a SwiftUI app that scans your folders and groups **duplicate** and **look‑alike** photos—even when they’re resized, rotated, lightly edited, or named differently. It blends a **perceptual hash** for speed with **Apple Vision deep embeddings** for high‑quality similarity, then shows you crisp previews so you can keep only the best.
+
+</div>
 
 ## 🖥️ Screenshots 
 
 <p align="center">
-    <img src="Documentation/1.png" width="40%">
-    <img src="Documentation/2.png" width="40%">
+    <img src="Documentation/App1.png" width="40%">
 </p>
 
 ## ✨ Highlights
@@ -14,25 +22,20 @@ Twinalyzer is a SwiftUI app that scans your folders and groups **duplicate** and
 - Adjustable similarity threshold slider 🎚️
 - Apple Vision embeddings for deep similarity 🔬
 - Dock badge & progress feedback 🧮
-- Optional notifications for long runs 🔔
-- Modern Swift Concurrency throughout 🧵
+- Notifications for long runs 🔔
 - Scan folders recursively and group near‑duplicates 📁
 - Understands common formats (HEIC/JPG/PNG/WEBP) 🖼️
 - QuickLook Support! Click a preview image to open in native macOS QuickLook. 
 
-## 🧠 How it works (in plain English)
+## 🧠 How it works
 
-1. **Walk the folders** you choose and gather images.  
-2. **Select Compute** for each run: a quick **Basic Scan** (good for exact matches) and a rich **Advanced Scan** (uses AI Vision to detect poses, structure, etc).  
-3. **Compare images** using a unified, normalized similarity score (0–1).  
-4. **Cluster items** into groups of exact duplicates and near‑duplicates.  
-5. **Preview & act**—open the original in Finder, inspect pixel‑level differences, or bulk‑decide which to keep. Click images to open in QuickLook! 
-
-
-## 🔍 Troubleshooting & Notes
-
-- **False positives/negatives** → adjust the similarity slider. For highly edited variants, use a slightly **lower** threshold.
-- **RAM** → If you're analyzing large data sets, make sure you have the RAM to handle it. It can easily use over 2GB of RAM. 
+- Select a folder (or folders) of images.
+- Select Settings and choose your scan settings.
+- Click Scan and wait for it to process.
+- Similar items will show up with a similarity percentage & any potential cross-folder dupes.
+- Walk the similarity table. Move down the table with arrow keys. Press space to preview the images in QuickLook.
+- Press "z" to select a Reference image for deletion and press "x" for a Match image.
+- Delete matches! Scan again for more.
 
 ## 🖥️ Install & Minimum Requirements
 
@@ -55,3 +58,18 @@ git clone https://github.com/gbabichev/twinalyzer.git
 cd twinalyzer
 open twinalyzer.xcodeproj
 ```
+
+## 📝 Changelog
+
+### 1.0.0 
+- Initial Release. 
+
+## 📄 License
+
+MIT — free for personal and commercial use. 
+
+## Privacy
+<a href="Documentation/PrivacyPolicy.html">Privacy Policy</a>
+
+## Support 
+<a href="Documentation/Support.html">Support</a>

@@ -1,27 +1,27 @@
 {
   "fill" : {
-    "solid" : "extended-gray:1.00000,1.00000"
+    "automatic-gradient" : "srgb:0.00044,0.37767,0.70617,1.00000"
   },
   "groups" : [
     {
       "blur-material" : 0.5,
       "layers" : [
         {
-          "hidden" : false,
-          "image-name" : "SearchSparkle.png",
-          "name" : "SearchSparkle",
+          "glass" : true,
+          "image-name" : "Search.png",
+          "name" : "Search",
           "position" : {
-            "scale" : 0.35,
+            "scale" : 0.65,
             "translation-in-points" : [
-              30.1953125,
-              31.9328125
+              54.6875,
+              58.890625
             ]
           }
         }
       ],
       "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 1
+        "kind" : "neutral",
+        "opacity" : 0.5
       },
       "translucency" : {
         "enabled" : true,
@@ -29,34 +29,26 @@
       }
     },
     {
-      "blur-material" : null,
       "layers" : [
         {
           "image-name" : "DigitalFlower.png",
           "name" : "DigitalFlower"
         }
       ],
-      "position" : {
-        "scale" : 1,
-        "translation-in-points" : [
-          -1,
-          -5
-        ]
-      },
       "shadow" : {
-        "kind" : "layer-color",
+        "kind" : "neutral",
         "opacity" : 1
       },
-      "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.5
+        "value" : 0.2
       }
     }
   ],
   "supported-platforms" : {
-    "squares" : [
-      "macOS"
-    ]
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
   }
 }
