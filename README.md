@@ -47,6 +47,9 @@ Twinalyzer is a SwiftUI app that scans your folders and groups **duplicate** and
 
 ### ⚙️ Installation
 
+<a href="https://apps.apple.com/us/app/twinalyzer/id6753094495?mt=12
+Twinalyzer">Download from the App Store!</a>
+
 Download from Releases. It's signed & notarized!
 
 ### ⚙️ Build it yourself!
