@@ -98,25 +98,28 @@ struct ContentView: View {
         QuickLookPreview.shared.show(urls: urls)
     }
     
-    //MARK: - Main UI
-    var body: some View {
-        Group {
-            if vm.isAnyOperationRunning {
-                processingView
-            } else {
-                NavigationSplitView {
-                    sidebarContent
-                        .navigationSplitViewColumnWidth(min: 100, ideal:200, max:300)
-                } content: {
-                    tableView
-                        .navigationSplitViewColumnWidth(min: 400, ideal:400)
-                        .layoutPriority(1)
-                } detail: {
-                    detailSplitView
-                        .navigationSplitViewColumnWidth(min: 200, ideal:200)
-                }
+    // MARK: - Main UI
+    @ViewBuilder
+    private var mainLayout: some View {
+        if vm.isAnyOperationRunning {
+            processingView
+        } else {
+            NavigationSplitView {
+                sidebarContent
+                    .navigationSplitViewColumnWidth(min: 100, ideal:200, max:300)
+            } content: {
+                tableView
+                    .navigationSplitViewColumnWidth(min: 400, ideal:400)
+                    .layoutPriority(1)
+            } detail: {
+                detailSplitView
+                    .navigationSplitViewColumnWidth(min: 200, ideal:200)
             }
         }
+    }
+    
+    var body: some View {
+        mainLayout
         .frame(minWidth: 1200, minHeight: 600)
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
@@ -324,14 +327,15 @@ struct ContentView: View {
         }
         .onChange(of: vm.comparisonResults) { _, _ in
             // Reset sort when new results arrive
+            selectionDebounceTimer?.invalidate()
+            selectionDebounceTimer = nil
+            tableSelection = []
+            debouncedSelection = []
             sortOrder = []
             vm.updateDisplayedRows(sortOrder: [])
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                if !displayedRows.isEmpty {
-                    tableSelection = [displayedRows.first!.id]
-                    isTableFocused = true
-                }
-            }
+        }
+        .onChange(of: vm.activeSortedRows) { _, newRows in
+            handleActiveRowsChange(newRows)
         }
         .onAppear {
             // Initialize display on first load

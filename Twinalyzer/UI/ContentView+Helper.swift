@@ -164,6 +164,39 @@ extension ContentView {
         }
     }
     
+    func handleActiveRowsChange(_ newRows: [TableRow]) {
+        selectionDebounceTimer?.invalidate()
+        selectionDebounceTimer = nil
+        
+        let validIDs = Set(newRows.map { $0.id })
+        let currentSelection = tableSelection
+        let currentDebounced = debouncedSelection
+        let firstID = newRows.first?.id
+        
+        DispatchQueue.main.async {
+            let prunedSelection = currentSelection.intersection(validIDs)
+            if prunedSelection != tableSelection {
+                tableSelection = prunedSelection
+            }
+            
+            let prunedDebounced = currentDebounced.intersection(validIDs)
+            if prunedDebounced != debouncedSelection {
+                debouncedSelection = prunedDebounced
+            }
+            
+            guard let firstID, tableSelection.isEmpty else {
+                if !newRows.isEmpty {
+                    isTableFocused = true
+                }
+                return
+            }
+            
+            tableSelection = [firstID]
+            debouncedSelection = [firstID]
+            isTableFocused = true
+        }
+    }
+    
     
     
     

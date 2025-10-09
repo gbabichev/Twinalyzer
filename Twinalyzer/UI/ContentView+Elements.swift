@@ -591,6 +591,7 @@ private struct DuplicatesFolderPanel: View {
         }
         .navigationTitle("Results (\(displayedRows.count))")
         .focused($isTableFocused)
+        .id(vm.tableReloadToken)
         .transaction { $0.disablesAnimations = true }  // Prevent sort animations
         .padding(.top, macOS15Padding)
         .overlay {
