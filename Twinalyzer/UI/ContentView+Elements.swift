@@ -386,24 +386,37 @@ private struct DuplicatesFolderPanel: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                Button {
-                    vm.openFolderInFinder(refDir)
-                } label: {
-                    Label {
-                        Text(row.referenceShort)
-                            .font(.caption)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .multilineTextAlignment(.center)
-                            .underline()
-                    } icon: {
-                        Image(systemName: "folder")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Button {
+                        vm.openFolderInFinder(refDir)
+                    } label: {
+                        Label {
+                            Text(row.referenceShort)
+                                .font(.caption)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .multilineTextAlignment(.center)
+                                .underline()
+                        } icon: {
+                            Image(systemName: "folder")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .help("Reveal containing folder in Finder")
+
+                    Button {
+                        vm.deleteFolder(refDir)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete reference folder")
+                    .disabled(vm.isProcessing)
                 }
-                .buttonStyle(.plain)
-                .help("Reveal containing folder in Finder")
 
                 Button {
                     openInQuickLook(at: row.reference)
@@ -432,25 +445,38 @@ private struct DuplicatesFolderPanel: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                Button {
-                    vm.openFolderInFinder(matchDir)
-                } label: {
-                    Label {
-                        Text(row.similarShort)
-                            .font(.caption)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(row.isCrossFolder ? .red : .black)
-                            .underline()
-                    } icon: {
-                        Image(systemName: "folder")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Button {
+                        vm.openFolderInFinder(matchDir)
+                    } label: {
+                        Label {
+                            Text(row.similarShort)
+                                .font(.caption)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(row.isCrossFolder ? .red : .black)
+                                .underline()
+                        } icon: {
+                            Image(systemName: "folder")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .help("Reveal containing folder in Finder")
+
+                    Button {
+                        vm.deleteFolder(matchDir)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete match folder")
+                    .disabled(vm.isProcessing)
                 }
-                .buttonStyle(.plain)
-                .help("Reveal containing folder in Finder")
 
                 Button {
                     openInQuickLook(at: row.similar)

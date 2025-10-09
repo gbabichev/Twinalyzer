@@ -854,6 +854,42 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func deleteFolder(_ folderPath: String) {
+        do {
+            let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+            try FileManager.default.trashItem(at: folderURL, resultingItemURL: nil)
+            print("Moved folder to trash: \(folderPath)")
+
+            // Remove the deleted folder from discovered leaf folders and exclusions
+            let deletedURL = folderURL.standardizedFileURL
+            discoveredLeafFolders.removeAll { $0.standardizedFileURL == deletedURL }
+            excludedLeafFolders = excludedLeafFolders.filter { $0.standardizedFileURL != deletedURL }
+
+            // Remove all comparison results involving this folder
+            comparisonResults = comparisonResults.compactMap { result in
+                let refFolder = URL(fileURLWithPath: result.reference).deletingLastPathComponent().path
+                let similarsInFolder = result.similars.filter { similar in
+                    let simFolder = URL(fileURLWithPath: similar.path).deletingLastPathComponent().path
+                    return simFolder != folderPath
+                }
+
+                // Remove the entire result if reference is in deleted folder or no similars remain
+                if refFolder == folderPath || similarsInFolder.count <= 1 {
+                    return nil
+                }
+
+                return ImageComparisonResult(reference: result.reference, similars: similarsInFolder)
+            }
+
+            // Rebuild the table and snapshots
+            invalidateAllCaches()
+            updateDisplayedRows(sortOrder: [])
+
+        } catch {
+            print("Failed to move folder to trash: \(error.localizedDescription)")
+        }
+    }
+
     func deleteMatchedFolders() {
         // Collect all "match" folders from cross-folder duplicate pairs
         let foldersToDelete = Set(orderedCrossFolderPairsStatic.map { $0.match })
