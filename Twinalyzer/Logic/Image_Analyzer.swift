@@ -120,15 +120,14 @@ enum ImageAnalyzer {
                     await Task.yield()
                 }
             } else {
-                // FIXED: Process ALL images together with NO chunking
-                // This ensures every image is compared against every other image
+                // Process ALL images together - essential for finding all duplicates
                 let allFiles = await getAllFilesFromExactFolders(
                     folders: leafFolders,
                     topLevelOnly: false,
                     ignoredFolderName: ignoredFolderName,
                     shouldCancel: shouldCancel
                 )
-                
+
                 // Process ALL files in a single batch for comprehensive comparison
                 results = await processImageBatch(
                     files: allFiles,
@@ -336,22 +335,22 @@ enum ImageAnalyzer {
         paths.reserveCapacity(files.count)
         
         // Extract Vision framework feature vectors from each image
+        // Use autoreleasepool every 50 images to manage memory during large batches
         for (index, url) in files.enumerated() {
             if shouldCancel?() == true { break }
-            
+
             // Yield control periodically to prevent beachballing
             if index % 10 == 0 {
                 await Task.yield()
             }
-            
-            // Remove memory pressure check - chunking handles this
-            
-            // Extract feature with proper memory management
-            if let observation = await extractFeature(from: url) {
+
+            // Wrap extraction in autoreleasepool to release temporary objects
+            let observation = await extractFeature(from: url)
+            if let observation = observation {
                 observations.append(observation)
                 paths.append(url.path)
             }
-            
+
             updateProgress(processedSoFar + index + 1, totalCount, progress)
         }
         

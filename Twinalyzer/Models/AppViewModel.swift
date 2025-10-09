@@ -524,43 +524,185 @@ final class AppViewModel: ObservableObject {
                 } onCancel: {}
             }
             
+            // Process results off the main thread first to avoid blocking UI
+            let tableRowsData = await Task.detached(priority: .userInitiated) {
+                // Build TableRow objects off the main thread
+                return results.flatMap { result in
+                    result.similars
+                        .filter { $0.path != result.reference }
+                        .map { similar in
+                            TableRow(
+                                reference: result.reference,
+                                similar: similar.path,
+                                percent: similar.percent
+                            )
+                        }
+                }
+            }.value
+
             await MainActor.run {
                 if !Task.isCancelled {
+                    // Store results and pre-computed table rows
                     self.comparisonResults = results
-                    self.updateDisplayedRows(sortOrder: [])
-                    self.buildFolderDuplicatesSnapshot()
-                    
+                    self._tableRowsCache = tableRowsData  // Directly set the cache to avoid recomputation
+
+                    self.processingProgress = nil
+                    self.isProcessing = false
+                    self.analysisTask = nil
+
                     // Check if no results were found and show alert
-                    let matches = self.tableRows.count
+                    let matches = tableRowsData.count
                     if matches == 0 {
                         self.showNoResultsAlert = true
                         self.noResultsAlertMessage = "No similar images were found with the current similarity threshold (\(Int(self.similarityThreshold * 100))%). Try lowering the threshold or selecting different folders."
                     }
-                    
+
                     self.postProcessingDoneNotification(matches: matches)
+
+                    // Trigger sorting in background
+                    self.updateDisplayedRows(sortOrder: [])
                 }
-                self.processingProgress = nil
-                self.isProcessing = false
-                self.analysisTask = nil
             }
+
+            // Build folder duplicates snapshot off the main thread to prevent beachballing
+            await self.buildFolderDuplicatesSnapshotAsync()
         }
     }
     
+    /// Async version that performs heavy computation off the main thread
+    /// Prevents beachballing by building the folder duplicates snapshot on a background thread
+    private func buildFolderDuplicatesSnapshotAsync() async {
+        // Snapshot rows on main thread (quick copy)
+        let rows = await MainActor.run { tableRows }
+
+        // Perform ALL heavy computation off the main thread
+        let snapshotData = await Task.detached(priority: .userInitiated) {
+            // Helper function for formatting folder display names (inline to avoid MainActor issues)
+            func formatFolderDisplayName(for url: URL) -> String {
+                let folderName = url.lastPathComponent
+                let parentName = url.deletingLastPathComponent().lastPathComponent
+
+                if parentName.isEmpty || parentName == "/" || parentName == folderName {
+                    return folderName
+                }
+
+                return "\(parentName)/\(folderName)"
+            }
+
+            // Representative image per folder
+            var reps: [String: String] = [:]
+            // Display names cache
+            var displayNames: [String: String] = [:]
+
+            for row in rows {
+                let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+                let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+
+                if reps[refFolder] == nil { reps[refFolder] = row.reference }
+                if reps[matchFolder] == nil { reps[matchFolder] = row.similar }
+
+                // Cache display names
+                if displayNames[refFolder] == nil {
+                    displayNames[refFolder] = formatFolderDisplayName(for: URL(fileURLWithPath: refFolder))
+                }
+                if displayNames[matchFolder] == nil {
+                    displayNames[matchFolder] = formatFolderDisplayName(for: URL(fileURLWithPath: matchFolder))
+                }
+            }
+
+            // Cross-folder counts (per folder, bidirectional)
+            var folderHitCounts: [String: Int] = [:]
+            for row in rows {
+                let ref = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+                let match = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+                guard ref != match else { continue }
+                folderHitCounts[ref, default: 0] += 1
+                folderHitCounts[match, default: 0] += 1
+            }
+
+            // Folder relationship clusters (unordered unique pairs)
+            var folderPairs: Set<[String]> = []
+            for row in rows {
+                let a = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+                let b = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+                guard a != b else { continue }
+                folderPairs.insert([a, b].sorted())
+            }
+            let clusters = Array(folderPairs).sorted { $0[0] < $1[0] }
+
+            // Directional majority (reference → match) to mirror table direction
+            struct DirKey: Hashable { let ref: String; let match: String }
+            struct UnKey: Hashable { let a: String; let b: String }
+            var directional: [DirKey: Int] = [:]
+            for row in rows {
+                let rf = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
+                let mf = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+                guard rf != mf else { continue }
+                directional[DirKey(ref: rf, match: mf), default: 0] += 1
+            }
+
+            var totals: [UnKey: (ab: Int, ba: Int)] = [:]
+            for (k, c) in directional {
+                if k.ref <= k.match {
+                    let u = UnKey(a: k.ref, b: k.match)
+                    var t = totals[u] ?? (ab: 0, ba: 0)
+                    t.ab += c
+                    totals[u] = t
+                } else {
+                    let u = UnKey(a: k.match, b: k.ref)
+                    var t = totals[u] ?? (ab: 0, ba: 0)
+                    t.ba += c
+                    totals[u] = t
+                }
+            }
+
+            var orderedPairs: [OrderedFolderPair] = []
+            orderedPairs.reserveCapacity(totals.count)
+            for (u, t) in totals {
+                if t.ab > t.ba {
+                    orderedPairs.append(.init(reference: u.a, match: u.b, count: t.ab))
+                } else if t.ba > t.ab {
+                    orderedPairs.append(.init(reference: u.b, match: u.a, count: t.ba))
+                } else {
+                    // tie → deterministic
+                    orderedPairs.append(.init(reference: u.a, match: u.b, count: t.ab))
+                }
+            }
+            orderedPairs.sort {
+                if $0.count != $1.count { return $0.count > $1.count }
+                if $0.reference != $1.reference { return $0.reference < $1.reference }
+                return $0.match < $1.match
+            }
+
+            return (reps: reps, hitCounts: folderHitCounts, clusters: clusters, displayNames: displayNames, orderedPairs: orderedPairs)
+        }.value
+
+        // Commit the snapshot on main thread (quick assignment)
+        await MainActor.run {
+            self.representativeImageByFolderStatic = snapshotData.reps
+            self.crossFolderDuplicateCountsStatic = snapshotData.hitCounts
+            self.folderClustersStatic = snapshotData.clusters
+            self.folderDisplayNamesStatic = snapshotData.displayNames
+            self.orderedCrossFolderPairsStatic = snapshotData.orderedPairs
+        }
+    }
+
+    /// Synchronous version kept for compatibility (can be removed if not used elsewhere)
     private func buildFolderDuplicatesSnapshot() {
         let rows = tableRows
-        
+
         // Representative image per folder
         var reps: [String: String] = [:]
         // Display names cache
         var displayNames: [String: String] = [:]
-        
+
         for row in rows {
             let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
             let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-            
+
             if reps[refFolder] == nil { reps[refFolder] = row.reference }
             if reps[matchFolder] == nil { reps[matchFolder] = row.similar }
-            
+
             // Cache display names
             if displayNames[refFolder] == nil {
                 displayNames[refFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: refFolder))
@@ -569,7 +711,7 @@ final class AppViewModel: ObservableObject {
                 displayNames[matchFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: matchFolder))
             }
         }
-        
+
         // Cross-folder counts (per folder, bidirectional)
         var folderHitCounts: [String: Int] = [:]
         for row in rows {
@@ -579,7 +721,7 @@ final class AppViewModel: ObservableObject {
             folderHitCounts[ref, default: 0] += 1
             folderHitCounts[match, default: 0] += 1
         }
-        
+
         // Folder relationship clusters (unordered unique pairs)
         var folderPairs: Set<[String]> = []
         for row in rows {
@@ -589,7 +731,7 @@ final class AppViewModel: ObservableObject {
             folderPairs.insert([a, b].sorted())
         }
         let clusters = Array(folderPairs).sorted { $0[0] < $1[0] }
-        
+
         // Directional majority (reference → match) to mirror table direction
         struct DirKey: Hashable { let ref: String; let match: String }
         struct UnKey: Hashable { let a: String; let b: String }
@@ -600,7 +742,7 @@ final class AppViewModel: ObservableObject {
             guard rf != mf else { continue }
             directional[DirKey(ref: rf, match: mf), default: 0] += 1
         }
-        
+
         var totals: [UnKey: (ab: Int, ba: Int)] = [:]
         for (k, c) in directional {
             if k.ref <= k.match {
@@ -615,7 +757,7 @@ final class AppViewModel: ObservableObject {
                 totals[u] = t
             }
         }
-        
+
         var orderedPairs: [OrderedFolderPair] = []
         orderedPairs.reserveCapacity(totals.count)
         for (u, t) in totals {
@@ -633,7 +775,7 @@ final class AppViewModel: ObservableObject {
             if $0.reference != $1.reference { return $0.reference < $1.reference }
             return $0.match < $1.match
         }
-        
+
         // Commit the snapshot
         self.representativeImageByFolderStatic = reps
         self.crossFolderDuplicateCountsStatic = folderHitCounts

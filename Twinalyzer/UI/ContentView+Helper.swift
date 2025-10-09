@@ -15,10 +15,10 @@ import Foundation
 
 // MARK: - Display Utilities
 enum DisplayHelpers {
-    
+
     /// Returns a shortened path showing only the last two components
     /// Example: "/Users/john/Photos/Vacation/beach.jpg" becomes "Vacation/beach.jpg"
-    static func shortDisplayPath(for fullPath: String) -> String {
+    nonisolated static func shortDisplayPath(for fullPath: String) -> String {
         let url = URL(fileURLWithPath: fullPath)
         let components = url.pathComponents
         if components.count >= 2 {
@@ -30,14 +30,14 @@ enum DisplayHelpers {
     
     /// Formats a similarity threshold as a percentage label
     /// Example: 0.75 becomes "75%"
-    static func formatSimilarityThreshold(_ value: Double) -> String {
+    nonisolated static func formatSimilarityThreshold(_ value: Double) -> String {
         "\(Int(round(value * 100)))%"
     }
     
     
     /// Formats a folder path for display, showing parent/folder structure
     /// Creates a hierarchical display like "Photos/Vacation" for better folder identification
-    static func formatFolderDisplayName(for url: URL) -> String {
+    nonisolated static func formatFolderDisplayName(for url: URL) -> String {
         let folderName = url.lastPathComponent
         let parentName = url.deletingLastPathComponent().lastPathComponent
         
@@ -50,9 +50,14 @@ enum DisplayHelpers {
     }
     
     /// Creates a summary string for processing progress
-    static func formatProcessingProgress(_ progress: Double?) -> String {
+    nonisolated static func formatProcessingProgress(_ progress: Double?) -> String {
         if let progress = progress {
-            return "\(Int(progress * 100))%"
+            let percentage = Int(progress * 100)
+            // Show "Finalizing..." when at 99% or higher (the list-building phase)
+            if percentage >= 99 {
+                return "99% - Finalizing..."
+            }
+            return "\(percentage)%"
         } else {
             return "Preparing..."
         }
@@ -87,7 +92,7 @@ struct TableRow: Identifiable, Hashable {
     }
     
     // MARK: - Initializer
-    init(reference: String, similar: String, percent: Double) {
+    nonisolated init(reference: String, similar: String, percent: Double) {
         self.id = "\(reference)::\(similar)"
         self.reference = reference
         self.similar = similar
