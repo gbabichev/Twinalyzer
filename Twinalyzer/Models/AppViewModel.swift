@@ -711,6 +711,40 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
+
+    func deleteMatchedFolders() {
+        // Collect all "match" folders from cross-folder duplicate pairs
+        let foldersToDelete = Set(orderedCrossFolderPairsStatic.map { $0.match })
+
+        guard !foldersToDelete.isEmpty else { return }
+
+        // Delete each folder
+        for folderPath in foldersToDelete {
+            do {
+                let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+                try FileManager.default.trashItem(at: folderURL, resultingItemURL: nil)
+                print("Moved folder to trash: \(folderPath)")
+            } catch {
+                print("Failed to move folder to trash: \(error.localizedDescription)")
+            }
+        }
+
+        // Remove the deleted folders from discovered leaf folders and exclusions
+        let deletedURLs = Set(foldersToDelete.map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL })
+        discoveredLeafFolders.removeAll { deletedURLs.contains($0.standardizedFileURL) }
+        excludedLeafFolders = excludedLeafFolders.filter { !deletedURLs.contains($0.standardizedFileURL) }
+
+        // Clear comparison results since we've modified the folder structure
+        comparisonResults.removeAll()
+        activeSortedRows.removeAll()
+
+        // Clear static snapshots
+        folderClustersStatic.removeAll()
+        representativeImageByFolderStatic.removeAll()
+        crossFolderDuplicateCountsStatic.removeAll()
+        folderDisplayNamesStatic.removeAll()
+        orderedCrossFolderPairsStatic.removeAll()
+    }
     
     
     // MARK: - Selection Management

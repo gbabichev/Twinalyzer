@@ -108,7 +108,18 @@ struct ActionsCommands: Commands {
             }
             .keyboardShortcut("l", modifiers: [.command, .option])
             .disabled(viewModel.isAnyOperationRunning || !viewModel.hasSelectedMatches) // FIXED: Use isAnyOperationRunning
-            
+
+            Divider()
+
+            Button {
+                viewModel.deleteMatchedFolders()
+            } label: {
+                Label("Delete Matched Folders", systemImage: "folder.badge.minus")
+            }
+            .disabled(viewModel.isAnyOperationRunning || viewModel.orderedCrossFolderPairsStatic.isEmpty)
+
+            Divider()
+
             Button {
                 viewModel.clearAll()
             } label: {
