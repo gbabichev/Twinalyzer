@@ -42,7 +42,10 @@ struct ContentView: View {
     
     // MARK: - Inspector State
     @State private var showInspector = true
-    
+
+    // MARK: - Tutorial State
+    @State private var showTutorial = false
+
     @State var debouncedSelection: Set<String> = []
     @State var selectionDebounceTimer: Timer?
     @FocusState var isTableFocused: Bool
@@ -117,9 +120,21 @@ struct ContentView: View {
             }
         }
     }
-    
+
+    @ViewBuilder
+    private var contentWithTutorial: some View {
+        ZStack {
+            mainLayout
+
+            // Tutorial overlay
+            if showTutorial {
+                TutorialView(isPresented: $showTutorial)
+            }
+        }
+    }
+
     var body: some View {
-        mainLayout
+        contentWithTutorial
         .frame(minWidth: 1200, minHeight: 600)
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
@@ -340,6 +355,14 @@ struct ContentView: View {
         .onAppear {
             // Initialize display on first load
             vm.updateDisplayedRows(sortOrder: sortOrder)
+
+            // Show tutorial on first launch
+            if !UserDefaults.standard.bool(forKey: "hasSeenTutorial") {
+                showTutorial = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showTutorial)) { _ in
+            showTutorial = true
         }
         .fileExporter(
             isPresented: $vm.isExportingCSV,

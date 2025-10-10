@@ -10,6 +10,10 @@
 import SwiftUI
 import UserNotifications
 
+extension Notification.Name {
+    static let showTutorial = Notification.Name("showTutorial")
+}
+
 @main
 struct TwinalyzerApp: App {
     init() {
@@ -130,6 +134,11 @@ struct ActionsCommands: Commands {
         }
         
         CommandGroup(replacing: .help) {
+            Button("Show Tutorial") {
+                NotificationCenter.default.post(name: .showTutorial, object: nil)
+            }
+            .keyboardShortcut("?", modifiers: [.command, .shift])
+
             Button("Twinalyzer Help") {
                 if let url = URL(string: "https://github.com/gbabichev/") {
                     NSWorkspace.shared.open(url)
