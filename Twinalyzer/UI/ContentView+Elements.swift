@@ -825,7 +825,56 @@ struct SettingsPanelPopover: View {
             Text(DisplayHelpers.formatSimilarityThreshold(vm.similarityThreshold))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            
+
+            // Preset buttons
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach([0.70, 0.75, 0.80], id: \.self) { preset in
+                        Button {
+                            similarityDebounce?.cancel()
+                            localSimilarity = preset
+                            vm.similarityThreshold = preset
+                        } label: {
+                            Text("\(Int(preset * 100))")
+                                .font(.caption)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                HStack(spacing: 8) {
+                    ForEach([0.85, 0.90, 0.95], id: \.self) { preset in
+                        Button {
+                            similarityDebounce?.cancel()
+                            localSimilarity = preset
+                            vm.similarityThreshold = preset
+                        } label: {
+                            Text("\(Int(preset * 100))")
+                                .font(.caption)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                HStack(spacing: 8) {
+                    ForEach([0.98, 0.99, 1.00], id: \.self) { preset in
+                        Button {
+                            similarityDebounce?.cancel()
+                            localSimilarity = preset
+                            vm.similarityThreshold = preset
+                        } label: {
+                            Text("\(Int(preset * 100))")
+                                .font(.caption)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
         }
         .padding(20)
     }
