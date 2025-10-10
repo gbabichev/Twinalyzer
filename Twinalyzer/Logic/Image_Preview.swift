@@ -31,8 +31,7 @@ struct PreviewImage: View {
     
     // MARK: - Constants
     private static let loadingTimeout: TimeInterval = 10.0  // 10 second timeout for image loading
-    fileprivate let MEMORY_PRESSURE_THRESHOLD: UInt64 = 512000 * 1024 * 1024
-    
+
     // MARK: - Initializers
     /// Default initializer with standard priority
     init(path: String, maxDimension: CGFloat) {

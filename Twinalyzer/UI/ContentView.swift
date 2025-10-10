@@ -39,9 +39,6 @@ struct ContentView: View {
     // MARK: - Core State
     @EnvironmentObject var vm: AppViewModel
     @State var showSettingsPopover = false
-    
-    // MARK: - Inspector State
-    @State private var showInspector = true
 
     // MARK: - Tutorial State
     @State private var showTutorial = false

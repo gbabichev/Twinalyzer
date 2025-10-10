@@ -678,52 +678,6 @@ private struct SidebarHoverList: View {
     }
 }
 
-private struct SidebarLeafRow: View {
-    let leafURL: URL
-    let isProcessing: Bool
-    let removeAction: (URL) -> Void
-    @State private var isHovering = false
-    var body: some View {
-        HStack {
-            Image(systemName: "folder")
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(leafURL.lastPathComponent)
-                    .font(.body)
-                    .lineLimit(1)
-                
-                Text(DisplayHelpers.formatFolderDisplayName(for: leafURL))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-            }
-            
-            Spacer(minLength: 4)
-            
-            if !isProcessing && isHovering {
-                Button {
-                    removeAction(leafURL)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-                .help("Remove this folder")
-            }
-        }
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.01)) {
-                isHovering = hovering
-            }
-        }
-    }
-}
-
 struct SettingsPanelPopover: View {
     @ObservedObject var vm: AppViewModel
     @FocusState private var textFieldFocused: Bool

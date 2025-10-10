@@ -687,103 +687,6 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// Synchronous version kept for compatibility (can be removed if not used elsewhere)
-    private func buildFolderDuplicatesSnapshot() {
-        let rows = tableRows
-
-        // Representative image per folder
-        var reps: [String: String] = [:]
-        // Display names cache
-        var displayNames: [String: String] = [:]
-
-        for row in rows {
-            let refFolder = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-            let matchFolder = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-
-            if reps[refFolder] == nil { reps[refFolder] = row.reference }
-            if reps[matchFolder] == nil { reps[matchFolder] = row.similar }
-
-            // Cache display names
-            if displayNames[refFolder] == nil {
-                displayNames[refFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: refFolder))
-            }
-            if displayNames[matchFolder] == nil {
-                displayNames[matchFolder] = DisplayHelpers.formatFolderDisplayName(for: URL(fileURLWithPath: matchFolder))
-            }
-        }
-
-        // Cross-folder counts (per folder, bidirectional)
-        var folderHitCounts: [String: Int] = [:]
-        for row in rows {
-            let ref = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-            let match = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-            guard ref != match else { continue }
-            folderHitCounts[ref, default: 0] += 1
-            folderHitCounts[match, default: 0] += 1
-        }
-
-        // Folder relationship clusters (unordered unique pairs)
-        var folderPairs: Set<[String]> = []
-        for row in rows {
-            let a = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-            let b = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-            guard a != b else { continue }
-            folderPairs.insert([a, b].sorted())
-        }
-        let clusters = Array(folderPairs).sorted { $0[0] < $1[0] }
-
-        // Directional majority (reference → match) to mirror table direction
-        struct DirKey: Hashable { let ref: String; let match: String }
-        struct UnKey: Hashable { let a: String; let b: String }
-        var directional: [DirKey: Int] = [:]
-        for row in rows {
-            let rf = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
-            let mf = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
-            guard rf != mf else { continue }
-            directional[DirKey(ref: rf, match: mf), default: 0] += 1
-        }
-
-        var totals: [UnKey: (ab: Int, ba: Int)] = [:]
-        for (k, c) in directional {
-            if k.ref <= k.match {
-                let u = UnKey(a: k.ref, b: k.match)
-                var t = totals[u] ?? (ab: 0, ba: 0)
-                t.ab += c
-                totals[u] = t
-            } else {
-                let u = UnKey(a: k.match, b: k.ref)
-                var t = totals[u] ?? (ab: 0, ba: 0)
-                t.ba += c
-                totals[u] = t
-            }
-        }
-
-        var orderedPairs: [OrderedFolderPair] = []
-        orderedPairs.reserveCapacity(totals.count)
-        for (u, t) in totals {
-            if t.ab > t.ba {
-                orderedPairs.append(.init(reference: u.a, match: u.b, count: t.ab))
-            } else if t.ba > t.ab {
-                orderedPairs.append(.init(reference: u.b, match: u.a, count: t.ba))
-            } else {
-                // tie → deterministic
-                orderedPairs.append(.init(reference: u.a, match: u.b, count: t.ab))
-            }
-        }
-        orderedPairs.sort {
-            if $0.count != $1.count { return $0.count > $1.count }
-            if $0.reference != $1.reference { return $0.reference < $1.reference }
-            return $0.match < $1.match
-        }
-
-        // Commit the snapshot
-        self.representativeImageByFolderStatic = reps
-        self.crossFolderDuplicateCountsStatic = folderHitCounts
-        self.folderClustersStatic = clusters
-        self.folderDisplayNamesStatic = displayNames
-        self.orderedCrossFolderPairsStatic = orderedPairs
-    }
-    
     func cancelAnalysis() {
         cancelAllOperations()
         isProcessing = false
@@ -809,22 +712,6 @@ final class AppViewModel: ObservableObject {
         return (ref: components[0], match: components[1])
     }
 
-    func deleteSelectedReferences() {
-        guard !selectedReferencesForDeletion.isEmpty else { return }
-        let refsToDelete = Array(selectedReferencesForDeletion)
-        selectedReferencesForDeletion.removeAll()
-        let filePaths: [String] = refsToDelete.compactMap { decodeRowID($0)?.ref }
-        Set(filePaths).forEach(deleteFile)
-    }
-    
-//    func deleteSelectedMatches() {
-//        guard !selectedMatchesForDeletion.isEmpty else { return }
-//        let matchesToDelete = Array(selectedMatchesForDeletion)
-//        selectedMatchesForDeletion.removeAll()
-//        let filePaths: [String] = matchesToDelete.compactMap { decodeRowID($0)?.match }
-//        Set(filePaths).forEach(deleteFile)
-//    }
-    
     func deletePendingSelections() {
         var paths: Set<String> = []
         for id in selectedReferencesForDeletion { if let ref = decodeRowID(id)?.ref { paths.insert(ref) } }
@@ -927,28 +814,9 @@ final class AppViewModel: ObservableObject {
     
     // MARK: - Selection Management
     @Published var selectedReferencesForDeletion: Set<String> = []
-    var hasSelectedReferences: Bool { !selectedReferencesForDeletion.isEmpty }
-    
     @Published var selectedMatchesForDeletion: Set<String> = []
     var hasSelectedMatches: Bool { !selectedMatchesForDeletion.isEmpty }
-    
-    func toggleSelection(for rowIDs: Set<String>) {
-        if rowIDs.count > 1 {
-            let allChecked = rowIDs.allSatisfy { selectedMatchesForDeletion.contains($0) }
-            if allChecked {
-                for rowID in rowIDs { selectedMatchesForDeletion.remove(rowID) }
-            } else {
-                for rowID in rowIDs { selectedMatchesForDeletion.insert(rowID) }
-            }
-        } else if let focusedID = rowIDs.first {
-            if selectedMatchesForDeletion.contains(focusedID) {
-                selectedMatchesForDeletion.remove(focusedID)
-            } else {
-                selectedMatchesForDeletion.insert(focusedID)
-            }
-        }
-    }
-    
+
     func clearSelection() {
         selectedReferencesForDeletion.removeAll()
         selectedMatchesForDeletion.removeAll()

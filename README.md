@@ -15,6 +15,7 @@ Twinalyzer is a SwiftUI app that scans your folders and groups **duplicate** and
 
 <p align="center">
     <img src="Documentation/App1.png" width="40%">
+    <img src="Documentation/App2.png" width="40%">
 </p>
 
 ## ✨ Highlights
@@ -63,6 +64,13 @@ open twinalyzer.xcodeproj
 ```
 
 ## 📝 Changelog
+
+### 1.1.0
+- Added: Menu Bar Tool to delete ALL matched folders. 
+- Added: "Delete" icon to delete reference or matched folder in preview pane. 
+- Added: Tutorial when opening the app & from Menu Bar. 
+- Added: Quick toggles for similarity threshold.
+- Fixed: Rare freeze when sorting the table. 
 
 ### 1.0.0 
 - Initial Release. 

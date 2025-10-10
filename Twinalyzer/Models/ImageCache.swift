@@ -52,50 +52,7 @@ class ImageCache {
         // Set up memory pressure monitoring
         Self.setupMemoryPressureMonitoring()
     }
-    
-    // MARK: - Enhanced Memory Management
-    
-    /// Add aggressive cleanup methods
-    static func clearCache() {
-        shared.removeAllObjects()
-    }
-    
-    static func reduceCacheSize() {
-        // Reduce cache limits during cleanup
-        shared.countLimit = shared.countLimit / 4
-        shared.totalCostLimit = shared.totalCostLimit / 4
-        
-        // Restore after a delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            configureCacheLimits()
-        }
-    }
-    
-    // Add method to stop monitoring and cleanup
-    static func stopMonitoringAndCleanup() {
-        memoryMonitorTimer?.invalidate()
-        memoryMonitorTimer = nil
-        shared.removeAllObjects()
-        
-        // Reset to minimal limits
-        shared.countLimit = 5
-        shared.totalCostLimit = 512 * 1024 // 512KB
-    }
-    
-    static func aggressiveClear() {
-        stopMonitoringAndCleanup()
-        
-        // Force garbage collection
-        autoreleasepool {
-            shared.removeAllObjects()
-        }
-        
-        // Restart monitoring with clean slate
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            setupMemoryPressureMonitoring()
-        }
-    }
-    
+
     /// Configure cache limits based on current memory situation
     /// Nonisolated to be callable from anywhere; hops to main actor internally.
     private nonisolated static func configureCacheLimits() {

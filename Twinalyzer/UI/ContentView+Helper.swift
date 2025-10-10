@@ -33,22 +33,7 @@ enum DisplayHelpers {
     nonisolated static func formatSimilarityThreshold(_ value: Double) -> String {
         "\(Int(round(value * 100)))%"
     }
-    
-    
-    /// Formats a folder path for display, showing parent/folder structure
-    /// Creates a hierarchical display like "Photos/Vacation" for better folder identification
-    nonisolated static func formatFolderDisplayName(for url: URL) -> String {
-        let folderName = url.lastPathComponent
-        let parentName = url.deletingLastPathComponent().lastPathComponent
-        
-        // If parent is empty, root, or same as folder, just show folder name
-        if parentName.isEmpty || parentName == "/" || parentName == folderName {
-            return folderName
-        }
-        
-        return "\(parentName)/\(folderName)"
-    }
-    
+
     /// Creates a summary string for processing progress
     nonisolated static func formatProcessingProgress(_ progress: Double?) -> String {
         if let progress = progress {
