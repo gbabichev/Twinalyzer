@@ -22,14 +22,6 @@ import ImageIO
 @preconcurrency import Vision
 @preconcurrency import CoreImage
 
-// MARK: - Array Extension for Batching
-extension Array {
-    nonisolated func chunked(into size: Int) -> [[Element]] {
-        return stride(from: 0, to: count, by: size).map {
-            Array(self[$0..<Swift.min($0 + size, count)])
-        }
-    }
-}
 // MARK: - Main Image Analysis Engine
 /// Static enum containing all image analysis functionality
 /// Provides both AI-based deep feature analysis and traditional perceptual hashing
@@ -39,7 +31,6 @@ extension Array {
 enum ImageAnalyzer {
     
     // MARK: - Configuration Constants
-    private nonisolated static let maxBatchSize = 1000          // Limit processing to prevent memory issues
     private nonisolated static let fileSystemChunkSize = 50     // Process directories in chunks
     
     // MARK: - Progress Tracking Utilities
@@ -208,7 +199,7 @@ enum ImageAnalyzer {
         var allPairs: [TableRow] = []
         
         if topLevelOnly {
-            // Process folders separately in chunks
+            // Process folders separately (no cross-folder comparison in this mode).
             var totalProcessed = 0
             let allFiles = await getAllFilesFromExactFolders(
                 folders: folders,
@@ -226,57 +217,39 @@ enum ImageAnalyzer {
                     ignoredFolderName: ignoredFolderName,
                     shouldCancel: shouldCancel
                 )
-                
-                // Process folder files in chunks
-                let chunks = files.chunked(into: maxBatchSize)
-                for chunk in chunks {
-                    if shouldCancel?() == true { break }
-                    
-                    let pairs = await hashAndCompareWithProgress(
-                        files: chunk,
-                        maxDist: maxDist,
-                        processedSoFar: totalProcessed,
-                        totalCount: totalCount,
-                        progress: progress,
-                        shouldCancel: shouldCancel
-                    )
-                    allPairs.append(contentsOf: pairs)
-                    totalProcessed += chunk.count
-                    
-                    // Brief pause between chunks
-                    await Task.yield()
-                }
+
+                // Compare the entire folder at once so pairs are not missed across chunks.
+                let pairs = await hashAndCompareWithProgress(
+                    files: files,
+                    maxDist: maxDist,
+                    processedSoFar: totalProcessed,
+                    totalCount: totalCount,
+                    progress: progress,
+                    shouldCancel: shouldCancel
+                )
+                allPairs.append(contentsOf: pairs)
+                totalProcessed += files.count
+
+                await Task.yield()
             }
         } else {
-            // Process all files together in chunks for cross-folder comparison
+            // Process all files together for full cross-folder comparison.
             let allFiles = await getAllFilesFromExactFolders(
                 folders: folders,
                 topLevelOnly: false,
                 ignoredFolderName: ignoredFolderName,
                 shouldCancel: shouldCancel
             )
-            
-            // Process ALL files in chunks
-            let chunks = allFiles.chunked(into: maxBatchSize)
-            var totalProcessed = 0
-            
-            for chunk in chunks {
-                if shouldCancel?() == true { break }
-                
-                let pairs = await hashAndCompareWithProgress(
-                    files: chunk,
-                    maxDist: maxDist,
-                    processedSoFar: totalProcessed,
-                    totalCount: allFiles.count,
-                    progress: progress,
-                    shouldCancel: shouldCancel
-                )
-                allPairs.append(contentsOf: pairs)
-                totalProcessed += chunk.count
-                
-                // Brief pause between chunks
-                await Task.yield()
-            }
+
+            let pairs = await hashAndCompareWithProgress(
+                files: allFiles,
+                maxDist: maxDist,
+                processedSoFar: 0,
+                totalCount: allFiles.count,
+                progress: progress,
+                shouldCancel: shouldCancel
+            )
+            allPairs.append(contentsOf: pairs)
         }
         
         // Return pairs sorted by similarity percentage (highest first)
