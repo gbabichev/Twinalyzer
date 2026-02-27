@@ -50,6 +50,7 @@ final class AppViewModel: ObservableObject {
     @Published var activeSortedRows: [TableRow] = []
     @Published var tableReloadToken: Int = 0  // Force table reload on sort changes
     private var sortComputeTask: Task<[TableRow], Never>? = nil
+    private var sortRequestGeneration: UInt64 = 0
     private var _sortCache: [String: [TableRow]] = [:]  // Cache sorted results
     
     // MARK: - Static Snapshot (frozen after analysis)
@@ -121,22 +122,25 @@ final class AppViewModel: ObservableObject {
     /// FIXED: Proper off-main-thread sorting with caching to prevent beachballing
     func updateDisplayedRows(sortOrder: [KeyPathComparator<TableRow>]) {
         let cacheKey = sortCacheKey(for: sortOrder)
-        
-        // 1) Check cache first for immediate response
+
+        // 1) Cancel prior sort and advance generation so stale completions are ignored.
+        sortComputeTask?.cancel()
+        sortComputeTask = nil
+        sortRequestGeneration &+= 1
+        let generation = sortRequestGeneration
+
+        // 2) Check cache first for immediate response
         if let cached = _sortCache[cacheKey] {
             activeSortedRows = cached
             tableReloadToken &+= 1  // Force table reload
             return
         }
-        
-        // 2) Cancel any in-flight sort to avoid race conditions
-        sortComputeTask?.cancel()
-        
+
         // 3) Snapshot the base data on main thread (value copy)
         let baseRows = tableRows
-        
+
         // 4) Sort off-main-thread to prevent beachballing
-        sortComputeTask = Task.detached(priority: .userInitiated) {
+        let sortTask = Task.detached(priority: .userInitiated) {
             let sortedRows: [TableRow]
             if sortOrder.isEmpty {
                 // Default sort by similarity (highest first)
@@ -146,15 +150,22 @@ final class AppViewModel: ObservableObject {
             }
             return sortedRows
         }
-        
+
+        sortComputeTask = sortTask
+
         // 5) Update on main thread when complete
         Task { @MainActor [weak self] in
             guard let self = self else { return }
-            if let rows = await self.sortComputeTask?.value {
-                // Cache the result for future use
-                self._sortCache[cacheKey] = rows
-                self.activeSortedRows = rows
-                self.tableReloadToken &+= 1  // Force table reload
+            let rows = await sortTask.value
+
+            // Ignore stale results from superseded sort requests.
+            guard self.sortRequestGeneration == generation else { return }
+
+            // Cache the result for future use
+            self._sortCache[cacheKey] = rows
+            self.activeSortedRows = rows
+            self.tableReloadToken &+= 1  // Force table reload
+            if self.sortRequestGeneration == generation {
                 self.sortComputeTask = nil
             }
         }
@@ -172,6 +183,9 @@ final class AppViewModel: ObservableObject {
     }
     
     private func invalidateAllCaches() {
+        sortComputeTask?.cancel()
+        sortComputeTask = nil
+        sortRequestGeneration &+= 1
         _tableRowsCache = nil
         _sortCache.removeAll()  // Clear sort cache
         
@@ -540,40 +554,46 @@ final class AppViewModel: ObservableObject {
                 }
             }.value
 
-            await MainActor.run {
-                if !Task.isCancelled {
-                    // Store results and pre-computed table rows
-                    self.comparisonResults = results
-                    self._tableRowsCache = tableRowsData  // Directly set the cache to avoid recomputation
+            let didApplyResults = await MainActor.run { () -> Bool in
+                guard !Task.isCancelled else { return false }
 
-                    self.processingProgress = nil
-                    self.isProcessing = false
-                    self.analysisTask = nil
+                // Store results and pre-computed table rows
+                self.comparisonResults = results
+                self._tableRowsCache = tableRowsData  // Directly set the cache to avoid recomputation
 
-                    // Check if no results were found and show alert
-                    let matches = tableRowsData.count
-                    if matches == 0 {
-                        self.showNoResultsAlert = true
-                        self.noResultsAlertMessage = "No similar images were found with the current similarity threshold (\(Int(self.similarityThreshold * 100))%). Try lowering the threshold or selecting different folders."
-                    }
+                self.processingProgress = nil
+                self.isProcessing = false
+                self.analysisTask = nil
 
-                    self.postProcessingDoneNotification(matches: matches)
-
-                    // Trigger sorting in background
-                    self.updateDisplayedRows(sortOrder: [])
+                // Check if no results were found and show alert
+                let matches = tableRowsData.count
+                if matches == 0 {
+                    self.showNoResultsAlert = true
+                    self.noResultsAlertMessage = "No similar images were found with the current similarity threshold (\(Int(self.similarityThreshold * 100))%). Try lowering the threshold or selecting different folders."
                 }
+
+                self.postProcessingDoneNotification(matches: matches)
+
+                // Trigger sorting in background
+                self.updateDisplayedRows(sortOrder: [])
+                return true
             }
 
             // Build folder duplicates snapshot off the main thread to prevent beachballing
-            await self.buildFolderDuplicatesSnapshotAsync()
+            if didApplyResults && !Task.isCancelled {
+                await self.buildFolderDuplicatesSnapshotAsync()
+            }
         }
     }
     
     /// Async version that performs heavy computation off the main thread
     /// Prevents beachballing by building the folder duplicates snapshot on a background thread
     private func buildFolderDuplicatesSnapshotAsync() async {
+        if Task.isCancelled { return }
+
         // Snapshot rows on main thread (quick copy)
         let rows = await MainActor.run { tableRows }
+        if Task.isCancelled { return }
 
         // Perform ALL heavy computation off the main thread
         let snapshotData = await Task.detached(priority: .userInitiated) {
@@ -676,9 +696,11 @@ final class AppViewModel: ObservableObject {
 
             return (reps: reps, hitCounts: folderHitCounts, clusters: clusters, displayNames: displayNames, orderedPairs: orderedPairs)
         }.value
+        if Task.isCancelled { return }
 
         // Commit the snapshot on main thread (quick assignment)
         await MainActor.run {
+            guard !Task.isCancelled else { return }
             self.representativeImageByFolderStatic = snapshotData.reps
             self.crossFolderDuplicateCountsStatic = snapshotData.hitCounts
             self.folderClustersStatic = snapshotData.clusters
@@ -698,6 +720,7 @@ final class AppViewModel: ObservableObject {
         analysisTask?.cancel(); analysisTask = nil
         discoveryTask?.cancel(); discoveryTask = nil
         sortComputeTask?.cancel(); sortComputeTask = nil
+        sortRequestGeneration &+= 1
     }
     
     // MARK: - File System Operations
