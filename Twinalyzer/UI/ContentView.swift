@@ -260,15 +260,7 @@ struct ContentView: View {
             guard !showSettingsPopover else { return .ignored }
             let targets = !debouncedSelection.isEmpty ? debouncedSelection : tableSelection
             guard !targets.isEmpty else { return .handled }
-            DispatchQueue.main.async {
-                for id in targets {
-                    if vm.selectedReferencesForDeletion.contains(id) {
-                        vm.selectedReferencesForDeletion.remove(id)
-                    } else {
-                        vm.selectedReferencesForDeletion.insert(id)
-                    }
-                }
-            }
+            vm.toggleReferenceDeletionSelection(forRowIDs: targets)
             return .handled
         }
         .onKeyPress("x") {

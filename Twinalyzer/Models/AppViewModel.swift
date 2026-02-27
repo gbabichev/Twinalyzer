@@ -712,10 +712,97 @@ final class AppViewModel: ObservableObject {
         return (ref: components[0], match: components[1])
     }
 
+    private func rowIDsSharingReference(with rowID: String) -> Set<String> {
+        guard let refPath = decodeRowID(rowID)?.ref else { return [rowID] }
+        let ids = Set(tableRows.lazy.filter { $0.reference == refPath }.map(\.id))
+        return ids.isEmpty ? [rowID] : ids
+    }
+
+    private var pendingReferenceDeletionSelection: Set<String>? = nil
+    private var isReferenceDeletionFlushScheduled = false
+
+    private func currentReferenceDeletionSelection() -> Set<String> {
+        pendingReferenceDeletionSelection ?? selectedReferencesForDeletion
+    }
+
+    private func queueReferenceDeletionSelection(_ newSelection: Set<String>) {
+        pendingReferenceDeletionSelection = newSelection
+        guard !isReferenceDeletionFlushScheduled else { return }
+        isReferenceDeletionFlushScheduled = true
+
+        DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isReferenceDeletionFlushScheduled = false
+                guard let pending = self.pendingReferenceDeletionSelection else { return }
+                self.pendingReferenceDeletionSelection = nil
+                if pending != self.selectedReferencesForDeletion {
+                    self.selectedReferencesForDeletion = pending
+                }
+            }
+        }
+    }
+
+    func selectReferenceDeletionSelection(forRowID rowID: String) {
+        let groupedIDs = rowIDsSharingReference(with: rowID)
+        let currentSelection = currentReferenceDeletionSelection()
+        guard !groupedIDs.isSubset(of: currentSelection) else { return }
+        var nextSelection = currentSelection
+        nextSelection.formUnion(groupedIDs)
+        queueReferenceDeletionSelection(nextSelection)
+    }
+
+    func toggleReferenceDeletionSelection(forRowID rowID: String) {
+        toggleReferenceDeletionSelection(forRowIDs: [rowID])
+    }
+
+    func toggleReferenceDeletionSelection(forRowIDs rowIDs: Set<String>) {
+        guard !rowIDs.isEmpty else { return }
+
+        let allRows = tableRows
+        var referencesToToggle: Set<String> = []
+        var fallbackRowIDs: Set<String> = []
+        var nextSelection = currentReferenceDeletionSelection()
+
+        for rowID in rowIDs {
+            if let ref = decodeRowID(rowID)?.ref {
+                referencesToToggle.insert(ref)
+            } else {
+                fallbackRowIDs.insert(rowID)
+            }
+        }
+
+        for refPath in referencesToToggle {
+            let groupedIDs = Set(allRows.lazy.filter { $0.reference == refPath }.map(\.id))
+            guard !groupedIDs.isEmpty else { continue }
+
+            // If all variants are already selected, unselect all; otherwise select all.
+            if groupedIDs.isSubset(of: nextSelection) {
+                nextSelection.subtract(groupedIDs)
+            } else {
+                nextSelection.formUnion(groupedIDs)
+            }
+        }
+
+        for rowID in fallbackRowIDs {
+            if nextSelection.contains(rowID) {
+                nextSelection.remove(rowID)
+            } else {
+                nextSelection.insert(rowID)
+            }
+        }
+
+        if nextSelection != currentReferenceDeletionSelection() {
+            queueReferenceDeletionSelection(nextSelection)
+        }
+    }
+
     func deletePendingSelections() {
         var paths: Set<String> = []
-        for id in selectedReferencesForDeletion { if let ref = decodeRowID(id)?.ref { paths.insert(ref) } }
+        let referenceSelections = currentReferenceDeletionSelection()
+        for id in referenceSelections { if let ref = decodeRowID(id)?.ref { paths.insert(ref) } }
         for id in selectedMatchesForDeletion   { if let match = decodeRowID(id)?.match { paths.insert(match) } }
+        pendingReferenceDeletionSelection = nil
         selectedReferencesForDeletion.removeAll()
         selectedMatchesForDeletion.removeAll()
         if !paths.isEmpty { paths.forEach(deleteFile) }
@@ -815,9 +902,12 @@ final class AppViewModel: ObservableObject {
     // MARK: - Selection Management
     @Published var selectedReferencesForDeletion: Set<String> = []
     @Published var selectedMatchesForDeletion: Set<String> = []
-    var hasSelectedMatches: Bool { !selectedMatchesForDeletion.isEmpty }
+    var hasSelectedMatches: Bool {
+        !selectedMatchesForDeletion.isEmpty || !selectedReferencesForDeletion.isEmpty
+    }
 
     func clearSelection() {
+        pendingReferenceDeletionSelection = nil
         selectedReferencesForDeletion.removeAll()
         selectedMatchesForDeletion.removeAll()
     }
@@ -837,6 +927,7 @@ final class AppViewModel: ObservableObject {
         excludedLeafFolders.removeAll()
         discoveredLeafFolders.removeAll(keepingCapacity: false)
         selectedMatchesForDeletion.removeAll(keepingCapacity: false)
+        pendingReferenceDeletionSelection = nil
         selectedReferencesForDeletion.removeAll(keepingCapacity: false)
         comparisonResults.removeAll(keepingCapacity: false)
         activeSortedRows.removeAll(keepingCapacity: false)
@@ -991,4 +1082,3 @@ final class AppViewModel: ObservableObject {
         UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
     }
 }
-

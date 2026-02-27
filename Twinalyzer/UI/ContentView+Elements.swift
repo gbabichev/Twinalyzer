@@ -430,7 +430,7 @@ private struct DuplicatesFolderPanel: View {
                 .help("Open in Preview")
 
                 Button("Delete Reference") {
-                    vm.selectedReferencesForDeletion.insert(row.id)
+                    vm.selectReferenceDeletionSelection(forRowID: row.id)
                     tableSelection = Set([row.id])
                 }
                 .help("Cross out this pair; you can batch delete later")
@@ -545,8 +545,8 @@ private struct DuplicatesFolderPanel: View {
                 HStack(spacing: 8) {
                     // Deletion checkbox
                     Button(action: { toggleRowDeletion(row.id) }) {
-                        Image(systemName: vm.selectedMatchesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
-                            .foregroundColor(vm.selectedMatchesForDeletion.contains(row.id) ? .blue : .secondary)
+                        Image(systemName: vm.selectedReferencesForDeletion.contains(row.id) ? "checkmark.square.fill" : "square")
+                            .foregroundColor(vm.selectedReferencesForDeletion.contains(row.id) ? .blue : .secondary)
                     }
                     .buttonStyle(.plain)
                     .frame(width: 20)

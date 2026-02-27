@@ -142,11 +142,7 @@ extension ContentView {
     }
     
     func toggleRowDeletion(_ rowID: String) {
-        if vm.selectedMatchesForDeletion.contains(rowID) {
-            vm.selectedMatchesForDeletion.remove(rowID)
-        } else {
-            vm.selectedMatchesForDeletion.insert(rowID)
-        }
+        vm.toggleReferenceDeletionSelection(forRowID: rowID)
     }
     
     func handleActiveRowsChange(_ newRows: [TableRow]) {
