@@ -42,6 +42,7 @@ struct ContentView: View {
 
     // MARK: - Tutorial State
     @State private var showTutorial = false
+    @State private var showAbout = false
 
     @State var debouncedSelection: Set<String> = []
     @State var selectionDebounceTimer: Timer?
@@ -126,6 +127,35 @@ struct ContentView: View {
             // Tutorial overlay
             if showTutorial {
                 TutorialView(isPresented: $showTutorial)
+            }
+
+            if showAbout {
+                ZStack {
+                    Color.black.opacity(0.5)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            showAbout = false
+                        }
+
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Button {
+                            showAbout = false
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 12)
+                        .padding(.trailing, 12)
+
+                        AboutView()
+                            .frame(maxWidth: 380)
+                    }
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(radius: 20)
+                }
             }
         }
     }
@@ -352,6 +382,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .showTutorial)) { _ in
             showTutorial = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showAbout)) { _ in
+            showAbout = true
         }
         .fileExporter(
             isPresented: $vm.isExportingCSV,

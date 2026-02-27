@@ -12,6 +12,7 @@ import UserNotifications
 
 extension Notification.Name {
     static let showTutorial = Notification.Name("showTutorial")
+    static let showAbout = Notification.Name("showAbout")
 }
 
 @main
@@ -40,22 +41,11 @@ struct TwinalyzerApp: App {
             ActionsCommands(viewModel: appViewModel)
             SidebarCommands()
         }
-        
-        // MARK: - Custom About Window
-        Window("About Twinalyzer", id: "AboutWindow") {
-            AboutView()
-                .frame(width: 450, height: 450)
-        }
-        .windowResizability(.contentSize) // Makes window non-resizable and size == content
-        .defaultSize(width: 400, height: 400)
-        .windowStyle(.hiddenTitleBar)
-        
     }
 }
 
 struct ActionsCommands: Commands {
     @ObservedObject var viewModel: AppViewModel
-    @Environment(\.openWindow) private var openWindow
     
     var body: some Commands {
         // Override the File menu to add Open command
@@ -149,7 +139,7 @@ struct ActionsCommands: Commands {
         
         CommandGroup(replacing: .appInfo) {
             Button("About Twinalyzer") {
-                openWindow(id: "AboutWindow")
+                NotificationCenter.default.post(name: .showAbout, object: nil)
             }
         }
     }
