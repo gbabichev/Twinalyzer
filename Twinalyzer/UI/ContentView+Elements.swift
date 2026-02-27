@@ -378,11 +378,13 @@ private struct DuplicatesFolderPanel: View {
         let maxDim = max(80, min(singleColumn - 40, size.height - 120))
         let refDir = URL(fileURLWithPath: row.reference).deletingLastPathComponent().path
         let matchDir = URL(fileURLWithPath: row.similar).deletingLastPathComponent().path
+        let referenceMarkedForDeletion = vm.selectedReferencesForDeletion.contains(row.id)
+        let matchMarkedForDeletion = vm.selectedMatchesForDeletion.contains(row.id)
         
         return HStack(alignment: .top, spacing: spacing) {
             // Left side: Reference image
             VStack(spacing: 8) {
-                Text("Reference" + (vm.selectedReferencesForDeletion.contains(row.id) ? " (to delete)" : ""))
+                Text("Reference" + (referenceMarkedForDeletion ? " (to delete)" : ""))
                     .font(.subheadline)
                     .fontWeight(.medium)
 
@@ -438,10 +440,15 @@ private struct DuplicatesFolderPanel: View {
                 .disabled(vm.isProcessing)
             }
             .frame(maxWidth: max(100, singleColumn))
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(referenceMarkedForDeletion ? Color.red.opacity(0.14) : Color.clear)
+            )
 
             // Right side: Match image
             VStack(spacing: 8) {
-                Text("Match" + (vm.selectedMatchesForDeletion.contains(row.id) ? " (to delete)" : ""))
+                Text("Match" + (matchMarkedForDeletion ? " (to delete)" : ""))
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
@@ -509,6 +516,11 @@ private struct DuplicatesFolderPanel: View {
                 .disabled(vm.isProcessing)
             }
             .frame(maxWidth: max(100, singleColumn))
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(matchMarkedForDeletion ? Color.red.opacity(0.14) : Color.clear)
+            )
         }
         .padding(inset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
