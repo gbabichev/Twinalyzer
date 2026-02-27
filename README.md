@@ -65,6 +65,11 @@ open twinalyzer.xcodeproj
 
 ## 📝 Changelog
 
+### 1.2.0
+- Enhanced duplicate image selection. If an image shows up more than once in the list, and is selected - all instances of that image are selected. 
+- Improved visibility of images that are selected. 
+- Improved performance of the Basic Scan. 
+
 ### 1.1.0
 - Added: Menu Bar Tool to delete ALL matched folders. 
 - Added: "Delete" icon to delete reference or matched folder in preview pane. 
