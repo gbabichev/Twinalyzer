@@ -595,7 +595,7 @@ private struct DuplicatesFolderPanel: View {
             }
             .width(80)
         }
-        .navigationTitle("Results (\(displayedRows.count))")
+        .navigationTitle("Twinalyzer")
         .focused($isTableFocused)
         .id(vm.tableReloadToken)
         .transaction { $0.disablesAnimations = true }  // Prevent sort animations

@@ -36,7 +36,6 @@ struct TwinalyzerApp: App {
                     await requestNotificationAuthIfNeeded()
                 }
         }
-        .windowStyle(.hiddenTitleBar)
         .commands {
             ActionsCommands(viewModel: appViewModel)
             SidebarCommands()

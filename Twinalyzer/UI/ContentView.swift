@@ -163,7 +163,7 @@ struct ContentView: View {
     var body: some View {
         contentWithTutorial
         .frame(minWidth: 1200, minHeight: 600)
-        .toolbarBackground(.visible, for: .windowToolbar)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .toolbar {
             // LEFT: Open (folder picker), Reset (clear UI), Settings (popover)
             ToolbarItemGroup(placement: .navigation) {
