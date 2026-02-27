@@ -754,6 +754,20 @@ struct SettingsPanelPopover: View {
                 }
             }
             .pickerStyle(.segmented)
+
+            if vm.selectedAnalysisMode == .perceptualHash {
+                let thresholdPercent = Int(round(vm.similarityThreshold * 100))
+                Text(
+                    thresholdPercent < 98
+                    ? "Basic Scan is only effective at 98-100% matches. Your current threshold (\(thresholdPercent)%) will likely produce many false positives."
+                    : "Basic Scan works best for near-exact duplicates in the 98-100% range."
+                )
+                .font(.footnote)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.leading)
+                .frame(width: 280, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             
             Text("Similarity Threshold")
                 .bold()
