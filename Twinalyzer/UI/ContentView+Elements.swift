@@ -407,17 +407,6 @@ private struct DuplicatesFolderPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help("Reveal containing folder in Finder")
-
-                    Button {
-                        vm.deleteFolder(refDir)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption2)
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Delete reference folder")
-                    .disabled(vm.isProcessing)
                 }
 
                 Button {
@@ -431,12 +420,20 @@ private struct DuplicatesFolderPanel: View {
                 .buttonStyle(.plain)
                 .help("Open in Preview")
 
-                Button("Delete Reference") {
+                Button("Mark Reference for Deletion") {
                     vm.selectReferenceDeletionSelection(forRowID: row.id)
                     tableSelection = Set([row.id])
                 }
-                .help("Cross out this pair; you can batch delete later")
+                .help("Mark this reference image for deletion; you can batch delete later")
                 .controlSize(.small)
+                .disabled(vm.isProcessing)
+
+                Button("Delete Reference Folder") {
+                    vm.deleteFolder(refDir)
+                }
+                .help("Delete reference folder")
+                .controlSize(.small)
+                .tint(.red)
                 .disabled(vm.isProcessing)
             }
             .frame(maxWidth: max(100, singleColumn))
@@ -472,17 +469,6 @@ private struct DuplicatesFolderPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help("Reveal containing folder in Finder")
-
-                    Button {
-                        vm.deleteFolder(matchDir)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption2)
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Delete match folder")
-                    .disabled(vm.isProcessing)
                 }
 
                 Button {
@@ -507,12 +493,20 @@ private struct DuplicatesFolderPanel: View {
                 .buttonStyle(.plain)
                 .help("Open in Preview")
 
-                Button("Delete Match") {
+                Button("Mark Match for Deletion") {
                     vm.selectedMatchesForDeletion.insert(row.id)
                     tableSelection = Set([row.id])
                 }
-                .help("Cross out this pair; you can batch delete later")
+                .help("Mark this match image for deletion; you can batch delete later")
                 .controlSize(.small)
+                .disabled(vm.isProcessing)
+
+                Button("Delete Match Folder") {
+                    vm.deleteFolder(matchDir)
+                }
+                .help("Delete match folder")
+                .controlSize(.small)
+                .tint(.red)
                 .disabled(vm.isProcessing)
             }
             .frame(maxWidth: max(100, singleColumn))
