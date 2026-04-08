@@ -193,11 +193,11 @@ enum ImageAnalyzer {
         progress: (@Sendable (Double) -> Void)?,
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [TableRow] {
-        
+
         guard shouldCancel?() != true else { return [] }
-        
+
         var allPairs: [TableRow] = []
-        
+
         if topLevelOnly {
             // Process folders separately (no cross-folder comparison in this mode).
             var totalProcessed = 0
@@ -208,10 +208,24 @@ enum ImageAnalyzer {
                 shouldCancel: shouldCancel
             )
             let totalCount = allFiles.count
-            
+
+            // Pre-count total comparisons across all folders for accurate progress reporting
+            var totalComparisons = 0
             for dir in folders {
                 if shouldCancel?() == true { break }
-                
+                let files = await topLevelImageFilesAsync(
+                    in: dir,
+                    ignoredFolderName: ignoredFolderName,
+                    shouldCancel: shouldCancel
+                )
+                let n = files.count
+                totalComparisons += n * (n - 1) / 2
+            }
+            var completedComparisons = 0
+
+            for dir in folders {
+                if shouldCancel?() == true { break }
+
                 let files = await topLevelImageFilesAsync(
                     in: dir,
                     ignoredFolderName: ignoredFolderName,
@@ -224,10 +238,15 @@ enum ImageAnalyzer {
                     maxDist: maxDist,
                     processedSoFar: totalProcessed,
                     totalCount: totalCount,
+                    totalComparisons: totalComparisons,
+                    completedComparisons: completedComparisons,
                     progress: progress,
                     shouldCancel: shouldCancel
                 )
                 allPairs.append(contentsOf: pairs)
+
+                let n = files.count
+                completedComparisons += n * (n - 1) / 2
                 totalProcessed += files.count
 
                 await Task.yield()
@@ -241,11 +260,15 @@ enum ImageAnalyzer {
                 shouldCancel: shouldCancel
             )
 
+            let totalComparisons = allFiles.count * (allFiles.count - 1) / 2
+
             let pairs = await hashAndCompareWithProgress(
                 files: allFiles,
                 maxDist: maxDist,
                 processedSoFar: 0,
                 totalCount: allFiles.count,
+                totalComparisons: totalComparisons,
+                completedComparisons: 0,
                 progress: progress,
                 shouldCancel: shouldCancel
             )
@@ -375,52 +398,65 @@ enum ImageAnalyzer {
         maxDist: Int,
         processedSoFar: Int,
         totalCount: Int,
+        totalComparisons: Int,
+        completedComparisons: Int,
         progress: (@Sendable (Double) -> Void)?,
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [TableRow] {
         var hashes: [(path: String, hash: UInt64)] = []
-        
+
         // Generate perceptual hash for each image WITH PROGRESS REPORTING
         for (index, file) in files.enumerated() {
             if shouldCancel?() == true { break }
-            
+
             // Yield control every 25 files to prevent beachballing
             if index % 25 == 0 {
                 await Task.yield()
             }
-            
+
             if let hash = await blockHash(for: file) {
                 hashes.append((path: file.path, hash: hash))
             }
-            
+
             // Report progress for each image processed
             let currentTotal = processedSoFar + index + 1
             updateProgress(currentTotal, totalCount, progress)
         }
-        
+
         // ENHANCED: Compare all pairs with cooperative cancellation
         // FIXED: Collect pair data first, then create TableRows on MainActor
         var pairData: [(reference: String, similar: String, percent: Double)] = []
         var comparisonCount = 0
-        
+        let folderComparisons = hashes.count * (hashes.count - 1) / 2
+
         for i in 0..<hashes.count {
             if shouldCancel?() == true { break }
-            
+
             for j in (i + 1)..<hashes.count {
                 if shouldCancel?() == true { break }
-                
+
                 // CRITICAL: Yield control periodically in O(n²) loop
                 comparisonCount += 1
                 if comparisonCount % 250 == 0 {
                     await Task.yield()
+
+                    // Report smooth progress during comparison phase
+                    // Progress = (files hashed + comparisons done) / totalCount
+                    // but scaled so that total comparisons across all folders maps to totalCount
+                    let comparisonsDone = completedComparisons + comparisonCount
+                    let comparisonFraction = totalComparisons > 0 ? Double(comparisonsDone) / Double(totalComparisons) : 0
+                    let hashFraction = Double(processedSoFar + files.count) / Double(max(totalCount, 1))
+                    // Blend: 50% hashing, 50% comparison
+                    let overallFraction = (hashFraction + comparisonFraction) / 2.0
+                    updateProgress(Int(overallFraction * Double(totalCount)), totalCount, progress)
                 }
-                
+
                 let distance = hammingDistance(hashes[i].hash, hashes[j].hash)
                 if distance <= maxDist {
                     let similarity = 1.0 - (Double(distance) / 64.0)
                     let refPath = hashes[i].path
                     let simPath = hashes[j].path
-                    
+
                     pairData.append((reference: refPath, similar: simPath, percent: similarity))
                 }
             }
