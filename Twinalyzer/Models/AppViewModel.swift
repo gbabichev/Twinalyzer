@@ -28,7 +28,6 @@ final class AppViewModel: ObservableObject {
     @Published var exportFilename: String = "Results"
     
     // MARK: - Configuration Constants
-    private nonisolated static let maxDiscoveryBatchSize = 2000
     private nonisolated static let progressUpdateThrottle = 0.1
     
     // MARK: - Core Published State
@@ -353,9 +352,6 @@ final class AppViewModel: ObservableObject {
                 if !Task.isCancelled {
                     self.discoveredLeafFolders = discovered
                     self.reconcileExclusionsWithDiscovered()
-                    if discovered.count >= Self.maxDiscoveryBatchSize {
-                        print("Warning: Discovery limited to \(Self.maxDiscoveryBatchSize) folders to prevent memory issues")
-                    }
                 }
                 self.isDiscoveringFolders = false
                 self.discoveryTask = nil
@@ -365,17 +361,12 @@ final class AppViewModel: ObservableObject {
     
     private func discoverFoldersWithLimits(from roots: [URL]) async -> [URL] {
         var discovered: [URL] = []
-        discovered.reserveCapacity(Self.maxDiscoveryBatchSize)
         let ignoredName = ignoredFolderName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         for root in roots {
             if Task.isCancelled { break }
-            
+
             let leafFolders = await findLeafFoldersWithIgnoreFilter(root: root, ignoredName: ignoredName)
-            for folder in leafFolders {
-                if discovered.count >= Self.maxDiscoveryBatchSize { break }
-                discovered.append(folder)
-            }
-            if discovered.count >= Self.maxDiscoveryBatchSize { break }
+            discovered.append(contentsOf: leafFolders)
             await Task.yield()
         }
         return discovered
