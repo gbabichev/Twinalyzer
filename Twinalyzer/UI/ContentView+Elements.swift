@@ -78,8 +78,22 @@ extension ContentView {
                 if let p = vm.processingProgress {
                     ProgressView(value: p)
                         .frame(width: columnWidth)
-                    Text(DisplayHelpers.formatProcessingProgress(p))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("Step \(DisplayHelpers.currentStepNumber(vm.processingStepName))/2")
+                            .foregroundStyle(.secondary)
+                        Text("·")
+                            .foregroundStyle(.secondary)
+                        Text(vm.processingStepName)
+                            .foregroundStyle(.secondary)
+                        Text(DisplayHelpers.formatProcessingProgress(p))
+                            .foregroundStyle(.secondary)
+                        if let eta = vm.processingETA, eta > 5 {
+                            Text("·")
+                                .foregroundStyle(.secondary)
+                            Text(DisplayHelpers.formatETA(eta))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 } else {
                     ProgressView()
                         .frame(width: columnWidth)

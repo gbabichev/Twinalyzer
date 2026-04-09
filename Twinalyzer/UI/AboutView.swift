@@ -104,58 +104,5 @@ private struct AboutRow: View {
     }
 }
 
-struct AboutOverlayView: View {
-    @Binding var isPresented: Bool
-
-    var body: some View {
-        ZStack {
-            // Match the subtle dimming used by system sheets instead of a full blurred wall.
-            Color.black.opacity(0.25)
-                .ignoresSafeArea()
-                .onTapGesture { dismiss() }
-
-            VStack {
-                ZStack(alignment: .topTrailing) {
-                    AboutView()
-                        .frame(maxWidth: 380)
-                        .background(
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .fill(Color(NSColor.windowBackgroundColor))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                )
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        .shadow(color: Color.black.opacity(0.2), radius: 24, x: 0, y: 12)
-
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(12)
-                    .accessibilityLabel(Text("Close About"))
-                }
-            }
-            .padding(40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        }
-        .transition(.opacity)
-        .onExitCommand {
-            dismiss()
-        }
-    }
-
-    private func dismiss() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isPresented = false
-        }
-    }
-}
 
 #endif

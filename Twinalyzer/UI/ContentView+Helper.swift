@@ -36,15 +36,33 @@ enum DisplayHelpers {
 
     /// Creates a summary string for processing progress
     nonisolated static func formatProcessingProgress(_ progress: Double?) -> String {
-        if let progress = progress {
-            let percentage = Int(progress * 100)
-            // Show "Finalizing..." when at 99% or higher (the list-building phase)
-            if percentage >= 99 {
-                return "99% - Finalizing..."
-            }
-            return "\(percentage)%"
+        guard let progress = progress else { return "Preparing..." }
+        let percentage = Int(progress * 100)
+        return "\(percentage)%"
+    }
+
+    /// Formats an ETA duration into a human-readable string
+    nonisolated static func formatETA(_ seconds: TimeInterval) -> String {
+        let totalSeconds = Int(seconds)
+        if totalSeconds < 60 {
+            return "~\(totalSeconds)s remaining"
+        } else if totalSeconds < 3600 {
+            let minutes = totalSeconds / 60
+            let secs = totalSeconds % 60
+            return "~\(minutes)m \(secs)s remaining"
         } else {
-            return "Preparing..."
+            let hours = totalSeconds / 3600
+            let minutes = (totalSeconds % 3600) / 60
+            return "~\(hours)h \(minutes)m remaining"
+        }
+    }
+
+    /// Determines the step number from the step name
+    nonisolated static func currentStepNumber(_ stepName: String) -> String {
+        switch stepName {
+        case "Hashing": return "1"
+        case "Comparing": return "2"
+        default: return "?"
         }
     }
 }

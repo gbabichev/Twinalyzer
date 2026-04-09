@@ -40,6 +40,8 @@ final class AppViewModel: ObservableObject {
     @AppStorage("ignoredFolderName") var ignoredFolderName: String = "thumb"
     @Published var isProcessing: Bool = false
     @Published var processingProgress: Double? = nil
+    @Published var processingStepName: String = ""
+    @Published var processingETA: TimeInterval? = nil
     @Published var isDiscoveringFolders: Bool = false
     @Published var comparisonResults: [ImageComparisonResult] = [] {
         didSet { invalidateAllCaches() }
@@ -77,6 +79,7 @@ final class AppViewModel: ObservableObject {
     private var analysisTask: Task<Void, Never>?
     private var discoveryTask: Task<Void, Never>?
     private var lastProgressUpdate: Date = .distantPast
+    private var processingStartTime: Date?
     
     // MARK: - Computed Properties (lightweight)
     var activeLeafFolders: [URL] {
@@ -464,36 +467,46 @@ final class AppViewModel: ObservableObject {
     }
     
     // MARK: - Analysis Operations
-    func processImages(progress: @escaping @Sendable (Double) -> Void) {
+    func processImages(progress: @escaping @Sendable (String, Double) -> Void) {
         guard !isAnyOperationRunning else { return }
-        
+
         // Ask for notification permission (once). Safe if called repeatedly.
         ensureNotificationAuthorization()
-        
+
         // Clear the static snapshot up front
         folderClustersStatic.removeAll()
         representativeImageByFolderStatic.removeAll()
         crossFolderDuplicateCountsStatic.removeAll()
         folderDisplayNamesStatic.removeAll()
-        
+
         cancelAllOperations()
         isProcessing = true
         processingProgress = 0.0
-        
+        processingETA = nil
+        processingStartTime = Date()
+
         let leafFolders = activeLeafFolders
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
         let ignoredFolder = ignoredFolderName
-        
-        let progressWrapper: @Sendable (Double) -> Void = { [weak self] p in
+
+        let progressWrapper: @Sendable (String, Double) -> Void = { [weak self] stepName, p in
             Task { @MainActor in
                 let now = Date()
                 if let self = self, now.timeIntervalSince(self.lastProgressUpdate) >= Self.progressUpdateThrottle {
                     self.lastProgressUpdate = now
                     self.processingProgress = p
+                    self.processingStepName = stepName
+
+                    // Calculate ETA based on elapsed time and progress
+                    if let startTime = self.processingStartTime, p > 0.01 {
+                        let elapsed = Date().timeIntervalSince(startTime)
+                        let estimatedTotal = elapsed / p
+                        self.processingETA = max(0, estimatedTotal - elapsed)
+                    }
                 }
             }
-            DispatchQueue.main.async { progress(p) }
+            DispatchQueue.main.async { progress(stepName, p) }
         }
         
         analysisTask = Task {
@@ -553,6 +566,8 @@ final class AppViewModel: ObservableObject {
                 self._tableRowsCache = tableRowsData  // Directly set the cache to avoid recomputation
 
                 self.processingProgress = nil
+                self.processingStepName = ""
+                self.processingETA = nil
                 self.isProcessing = false
                 self.analysisTask = nil
 

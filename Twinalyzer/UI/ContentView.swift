@@ -265,7 +265,7 @@ struct ContentView: View {
                             // Clear selection states when starting new analysis
                             //tableSelection.removeAll()
                             //vm.clearSelection()
-                            vm.processImages(progress: { _ in })
+                            vm.processImages(progress: { _, _ in })
                         } label: {
                             Label("Analyze", systemImage: "sparkle")
                         }

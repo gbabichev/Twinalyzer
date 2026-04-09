@@ -76,7 +76,7 @@ struct ActionsCommands: Commands {
                 .keyboardShortcut(.escape)
             } else {
                 Button {
-                    viewModel.processImages(progress: { _ in })
+                    viewModel.processImages(progress: { _, _ in })
                 } label: {
                     Label("Analyze Images", systemImage: "sparkle")
                 }
