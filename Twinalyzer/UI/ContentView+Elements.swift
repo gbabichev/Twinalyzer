@@ -678,10 +678,22 @@ private struct SidebarHoverList: View {
         List {
             Section(
                 header:
-                    HStack {
-                        Text("Selected Folders")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Selected Folders")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                        }
+                        if vm.activeLeafFolders.count > 0 || vm.totalImageCount > 0 {
+                            HStack(spacing: 10) {
+                                Label("\(vm.activeLeafFolders.count)", systemImage: "folder")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                                Label("\(vm.totalImageCount)", systemImage: "photo")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                     }
                     .padding(.bottom, 10)
             ) {

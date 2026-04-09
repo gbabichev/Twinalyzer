@@ -34,6 +34,7 @@ final class AppViewModel: ObservableObject {
     @Published var selectedParentFolders: [URL] = []
     @Published var excludedLeafFolders: Set<URL> = []
     @Published var discoveredLeafFolders: [URL] = []
+    @Published var totalImageCount: Int = 0
     @AppStorage("similarityThreshold") var similarityThreshold: Double = 0.7
     @AppStorage("selectedAnalysisMode") var selectedAnalysisMode: AnalysisMode = .deepFeature
     @AppStorage("scanTopLevelOnly") var scanTopLevelOnly: Bool = false
@@ -86,7 +87,7 @@ final class AppViewModel: ObservableObject {
     var activeLeafFolders: [URL] {
         discoveredLeafFolders.filter { !excludedLeafFolders.contains($0) }
     }
-    
+
     var isAnyOperationRunning: Bool {
         isProcessing || isDiscoveringFolders
     }
@@ -98,7 +99,50 @@ final class AppViewModel: ObservableObject {
             return activeLeafFolders.sorted { $0.path < $1.path }
         }
     }
-    
+
+    // MARK: - Image Counting
+    private nonisolated static let imageExtensions: Set<String> = [
+        "jpg","jpeg","png","heic","heif","tiff","tif","bmp","gif","webp","dng","cr2","nef","arw"
+    ]
+
+    private func countImagesInFolders(_ folders: [URL]) async -> Int {
+        await withTaskGroup(of: Int.self) { group in
+            var totalCount = 0
+            for folder in folders {
+                group.addTask {
+                    let fm = FileManager.default
+                    guard let contents = try? fm.contentsOfDirectory(
+                        at: folder,
+                        includingPropertiesForKeys: [.isRegularFileKey],
+                        options: [.skipsHiddenFiles]
+                    ) else { return 0 }
+                    var count = 0
+                    for url in contents {
+                        if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
+                           Self.imageExtensions.contains(url.pathExtension.lowercased()) {
+                            count += 1
+                        }
+                    }
+                    return count
+                }
+            }
+            for await count in group {
+                totalCount += count
+            }
+            return totalCount
+        }
+    }
+
+    func refreshImageCount() {
+        let folders = activeLeafFolders
+        Task {
+            let count = await countImagesInFolders(folders)
+            await MainActor.run {
+                self.totalImageCount = count
+            }
+        }
+    }
+
     // MARK: - Table Data Management
     
     /// Generates TableRow objects from comparison results (cached)
@@ -289,6 +333,7 @@ final class AppViewModel: ObservableObject {
         
         if changed {
             reconcileExclusionsWithDiscovered()
+            refreshImageCount()
         }
     }
     
@@ -338,10 +383,11 @@ final class AppViewModel: ObservableObject {
                 self.reconcileExclusionsWithDiscovered()
                 self.isDiscoveringFolders = false
                 self.discoveryTask = nil
+                self.refreshImageCount()
             }
         }
     }
-    
+
     private func discoverFoldersAsync() {
         guard !selectedParentFolders.isEmpty else { return }
         guard !isAnyOperationRunning else { return }
@@ -356,6 +402,7 @@ final class AppViewModel: ObservableObject {
                 if !Task.isCancelled {
                     self.discoveredLeafFolders = discovered
                     self.reconcileExclusionsWithDiscovered()
+                    self.refreshImageCount()
                 }
                 self.isDiscoveringFolders = false
                 self.discoveryTask = nil
@@ -465,6 +512,7 @@ final class AppViewModel: ObservableObject {
     
     func removeLeafFolder(_ leafURL: URL) {
         excludedLeafFolders.insert(leafURL.standardizedFileURL)
+        refreshImageCount()
     }
     
     // MARK: - Analysis Operations
@@ -978,7 +1026,9 @@ final class AppViewModel: ObservableObject {
         crossFolderDuplicateCountsStatic.removeAll(keepingCapacity: false)
         folderDisplayNamesStatic.removeAll(keepingCapacity: false)
         orderedCrossFolderPairsStatic.removeAll(keepingCapacity: false)
-        
+
+        // Reset image count
+        totalImageCount = 0
     }
     
     // MARK: - CSV Export
