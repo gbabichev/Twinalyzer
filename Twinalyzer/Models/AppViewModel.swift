@@ -738,6 +738,13 @@ final class AppViewModel: ObservableObject {
         let url = URL(fileURLWithPath: folder, isDirectory: true)
         NSWorkspace.shared.open(url)
     }
+
+    func openFoldersInFinder(_ folders: [String]) {
+        for folder in folders {
+            let url = URL(fileURLWithPath: folder, isDirectory: true)
+            NSWorkspace.shared.open(url)
+        }
+    }
     
     private func decodeRowID(_ rowID: String) -> (ref: String, match: String)? {
         let components = rowID.components(separatedBy: "::")

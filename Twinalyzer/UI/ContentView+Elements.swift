@@ -287,48 +287,53 @@ private struct DuplicatesFolderPanel: View {
                             LazyVStack(alignment: .leading, spacing: 8) {
                                 ForEach(pairs) { pair in
                                     VStack(alignment: .leading, spacing: 2) {
-                                        // Reference row
-                                        HStack {
+                                        // Combined button to open both folders
+                                        HStack(spacing: 8) {
                                             Button {
-                                                vm.openFolderInFinder(pair.reference)
+                                                vm.openFoldersInFinder([pair.reference, pair.match])
                                             } label: {
-                                                HStack(spacing: 6) {
-                                                    Image(systemName: "folder")
-                                                        .foregroundStyle(.secondary)
-                                                    Text(vm.folderDisplayNamesStatic[pair.reference] ?? pair.reference)
-                                                        .font(.system(size: 13, weight: .medium))
-                                                        .lineLimit(1)
-                                                        .truncationMode(.middle)
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: "arrow.up.forward")
+                                                        .font(.system(size: 12))
+                                                    Text("Open Both Folders")
+                                                        .font(.system(size: 12, weight: .medium))
                                                 }
                                             }
-                                            .buttonStyle(.plain)
-                                            .help("Open in Finder")
+                                            //.buttonStyle(.borderedProminent)
+                                            .controlSize(.small)
+                                            .help("Open both folders in Finder")
 
                                             Spacer(minLength: 8)
 
-                                            // Optional strength badge
+                                            // Strength badge
                                             Text("×\(pair.count)")
                                                 .font(.system(size: 11))
                                                 .foregroundStyle(.tertiary)
                                         }
 
-                                        // Match row (indented)
-                                        HStack {
-                                            Button {
-                                                vm.openFolderInFinder(pair.match)
-                                            } label: {
-                                                HStack(spacing: 6) {
-                                                    Image(systemName: "folder")
-                                                        .foregroundStyle(.secondary)
-                                                    Text(vm.folderDisplayNamesStatic[pair.match] ?? pair.match)
-                                                        .font(.system(size: 12))
-                                                        .foregroundStyle(.secondary)
-                                                        .lineLimit(1)
-                                                        .truncationMode(.middle)
-                                                }
-                                            }
-                                            .buttonStyle(.plain)
-                                            .help("Open in Finder")
+                                        // Reference name (compact)
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "folder")
+                                                .foregroundStyle(.secondary)
+                                            Text(vm.folderDisplayNamesStatic[pair.reference] ?? pair.reference)
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                            Spacer()
+                                        }
+                                        .padding(.leading, 16)
+
+                                        // Match name (compact)
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "folder.fill")
+                                                .foregroundStyle(.tertiary)
+                                            Text(vm.folderDisplayNamesStatic[pair.match] ?? pair.match)
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(.tertiary)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                            Spacer()
                                         }
                                         .padding(.leading, 16)
                                     }
@@ -395,7 +400,8 @@ private struct DuplicatesFolderPanel: View {
         let referenceMarkedForDeletion = vm.selectedReferencesForDeletion.contains(row.id)
         let matchMarkedForDeletion = vm.selectedMatchesForDeletion.contains(row.id)
         
-        return HStack(alignment: .top, spacing: spacing) {
+        return VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: spacing) {
             // Left side: Reference image
             VStack(spacing: 8) {
                 Text("Reference" + (referenceMarkedForDeletion ? " (to delete)" : ""))
@@ -529,6 +535,19 @@ private struct DuplicatesFolderPanel: View {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(matchMarkedForDeletion ? Color.red.opacity(0.14) : Color.clear)
             )
+            }
+            // Combined button to open both folders
+            HStack(spacing: 8) {
+                Button {
+                    vm.openFoldersInFinder([refDir, matchDir])
+                } label: {
+                    Label("Open Both Folders", systemImage: "arrow.up.forward")
+                }
+                //.buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .help("Open both folders in Finder")
+            }
+            .frame(maxWidth: .infinity)
         }
         .padding(inset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
