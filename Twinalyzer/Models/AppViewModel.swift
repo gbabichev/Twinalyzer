@@ -80,6 +80,7 @@ final class AppViewModel: ObservableObject {
     private var discoveryTask: Task<Void, Never>?
     private var lastProgressUpdate: Date = .distantPast
     private var processingStartTime: Date?
+    private var badgeUpdateTask: Task<Void, Never>?
     
     // MARK: - Computed Properties (lightweight)
     var activeLeafFolders: [URL] {
@@ -484,6 +485,7 @@ final class AppViewModel: ObservableObject {
         processingProgress = 0.0
         processingETA = nil
         processingStartTime = Date()
+        startBadgeUpdater()
 
         let leafFolders = activeLeafFolders
         let threshold = similarityThreshold
@@ -568,6 +570,7 @@ final class AppViewModel: ObservableObject {
                 self.processingProgress = nil
                 self.processingStepName = ""
                 self.processingETA = nil
+                self.stopBadgeUpdater()
                 self.isProcessing = false
                 self.analysisTask = nil
 
@@ -727,6 +730,7 @@ final class AppViewModel: ObservableObject {
         discoveryTask?.cancel(); discoveryTask = nil
         sortComputeTask?.cancel(); sortComputeTask = nil
         sortRequestGeneration &+= 1
+        stopBadgeUpdater()
     }
     
     // MARK: - File System Operations
@@ -1079,7 +1083,10 @@ final class AppViewModel: ObservableObject {
     }
     
     // Clear Dock badge + remove our delivered/pending notifications + reset badge count.
+    // Skips clearing if a scan is in progress to avoid badge blip.
     func clearDockBadge() {
+        guard !isProcessing else { return }
+
         // 1) Dock badge
         DispatchQueue.main.async {
             NSApp.dockTile.badgeLabel = nil
@@ -1109,5 +1116,48 @@ final class AppViewModel: ObservableObject {
         
         // 3) Reset the system badge (macOS 13+)
         UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
+    }
+
+    // MARK: - Dock Badge During Processing
+
+    /// Starts a periodic task that updates the Dock badge with ETA or spinner
+    private func startBadgeUpdater() {
+        badgeUpdateTask?.cancel()
+        let spinnerChars = ["⋯", "◜", "◝", "◞", "◟"]
+        var spinnerIdx = 0
+
+        badgeUpdateTask = Task.detached { [weak self] in
+            while !Task.isCancelled {
+                await MainActor.run {
+                    guard let self = self, self.isProcessing else { return }
+
+                    if let eta = self.processingETA, eta > 10, let p = self.processingProgress, p > 0.02 {
+                        let totalSec = Int(eta)
+                        let badge: String
+                        if totalSec < 60 {
+                            badge = "~\(totalSec)s"
+                        } else {
+                            badge = "~\(totalSec / 60)m"
+                        }
+                        NSApp.dockTile.badgeLabel = badge
+                    } else {
+                        spinnerIdx = (spinnerIdx + 1) % spinnerChars.count
+                        NSApp.dockTile.badgeLabel = spinnerChars[spinnerIdx]
+                    }
+                    NSApp.dockTile.display()
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    /// Stops the badge updater and clears the badge
+    private func stopBadgeUpdater() {
+        badgeUpdateTask?.cancel()
+        badgeUpdateTask = nil
+        DispatchQueue.main.async {
+            NSApp.dockTile.badgeLabel = nil
+            NSApp.dockTile.display()
+        }
     }
 }
