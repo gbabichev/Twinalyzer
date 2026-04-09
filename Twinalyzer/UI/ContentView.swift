@@ -256,8 +256,10 @@ struct ContentView: View {
                     Button {
                         vm.cancelAnalysis()
                     } label: {
-                        Label("Cancel", systemImage: "xmark.circle")
+                        Label("Cancel", systemImage: "xmark.circle.fill")
+                            .symbolRenderingMode(.multicolor)
                     }
+                    .tint(.red)
                 } else {
                     // Ready state (only show if no pending deletions)
                     if pendingCount == 0 {

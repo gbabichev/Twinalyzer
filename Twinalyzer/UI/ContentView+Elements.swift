@@ -69,11 +69,19 @@ extension ContentView {
     // MARK: - Processing View
     var processingView: some View {
         VStack(spacing: 16) {
+            // Header icon and title
+            VStack(spacing: 6) {
+                Image(systemName: vm.isDiscoveringFolders ? "folder.badge.gearshape" : "magnifyingglass.circle.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.blue.gradient)
+                Text(vm.isDiscoveringFolders ? "Discovering Folders" : "Analyzing Images")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+
             if vm.isDiscoveringFolders {
                 ProgressView()
                     .frame(width: columnWidth)
-                Text("Discovering folders...")
-                    .foregroundStyle(.secondary)
             } else if vm.isProcessing {
                 if let p = vm.processingProgress {
                     ProgressView(value: p)
@@ -101,7 +109,7 @@ extension ContentView {
                         .foregroundStyle(.secondary)
                 }
             }
-            
+
             processingFolderList
                 .frame(width: columnWidth)
         }
@@ -110,16 +118,17 @@ extension ContentView {
     
     var processingFolderList: some View {
         VStack(spacing: 6) {
-            Text(vm.isDiscoveringFolders ? "Scanning Parent Folders..." : "Processing Folders...")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-            
-            Text("💡 99% takes a while sometimes... don't be alarmed by the beachball!")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-            
+            // Section header
+            HStack(spacing: 6) {
+                Image(systemName: vm.isDiscoveringFolders ? "folder.badge.gearshape" : "line.3.horizontal")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(vm.isDiscoveringFolders ? "Scanning Parent Folders" : "Processing Folders")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
             if vm.allFoldersBeingProcessed.isEmpty {
                 Text("No folders selected.")
                     .foregroundStyle(.secondary)
@@ -138,7 +147,7 @@ extension ContentView {
                             }
                             .buttonStyle(.plain)
                         }
-                        
+
                         ScrollView(.vertical, showsIndicators: false) {
                             LazyVStack(alignment: .center, spacing: 2) {
                                 // Top sentinel flips atTop as you scroll away/return
@@ -147,16 +156,32 @@ extension ContentView {
                                     .id("topSentinel")
                                     .onAppear { atTop = true }
                                     .onDisappear { atTop = false }
-                                
-                                ForEach(Array(vm.allFoldersBeingProcessed.enumerated()), id: \.offset) { _, url in
-                                    Text(DisplayHelpers.shortDisplayPath(for: url.path))
-                                        .font(.body)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .frame(maxWidth: .infinity, alignment: .center)
+
+                                ForEach(Array(vm.allFoldersBeingProcessed.enumerated()), id: \.offset) { index, url in
+                                    HStack(spacing: 8) {
+                                        Text("\(index + 1)")
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.tertiary)
+                                            .monospacedDigit()
+                                            .frame(width: 22)
+
+                                        Image(systemName: "folder.fill")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(.blue.opacity(0.7))
+
+                                        Text(DisplayHelpers.shortDisplayPath(for: url.path))
+                                            .font(.body)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(.secondary.opacity(0.06))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
                                 }
-                                
+
                                 // Bottom sentinel flips atBottom at end
                                 Color.clear
                                     .frame(height: 1)
@@ -168,7 +193,7 @@ extension ContentView {
                         }
                         .frame(width: columnWidth, height: viewportHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                        
+
                         // Bottom chevron — only when not at bottom
                         if !atBottom {
                             Button {
