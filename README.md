@@ -65,6 +65,11 @@ open twinalyzer.xcodeproj
 
 ## 📝 Changelog
 
+### 1.3.0
+- Significantly improved performance of image scanning. 
+- Improved scanning interface. 
+- Added a dock icon badge that shows the ETA. 
+
 ### 1.2.0
 - Enhanced duplicate image selection. If an image shows up more than once in the list, and is selected - all instances of that image are selected. 
 - Improved visibility of images that are selected. 
