@@ -19,9 +19,9 @@
 
 import Foundation
 import CoreGraphics
+import CryptoKit
 import ImageIO
 @preconcurrency import Vision
-@preconcurrency import CoreImage
 
 // MARK: - Main Image Analysis Engine
 /// Static enum containing all image analysis functionality
@@ -33,6 +33,8 @@ enum ImageAnalyzer {
 
     // MARK: - Configuration Constants
     private nonisolated static let fileSystemChunkSize = 50     // Process directories in chunks
+    private nonisolated static let featureTileSize = 256
+    private nonisolated static let featurePrintRevision = VNGenerateImageFeaturePrintRequestRevision2
     nonisolated static let stepHashing = "Hashing"
     nonisolated static let stepComparing = "Comparing"
 
@@ -74,8 +76,6 @@ enum ImageAnalyzer {
                 return
             }
 
-            var results: [ImageComparisonResult] = []
-
             // Collect all files
             let allFiles = await getAllFilesFromExactFolders(
                 folders: leafFolders,
@@ -83,6 +83,24 @@ enum ImageAnalyzer {
                 ignoredFolderName: ignoredFolderName,
                 shouldCancel: shouldCancel
             )
+
+            // Cross-folder enhanced scans use the persistent, exact tiled pipeline. Folder-local
+            // scans retain the existing clustering behavior for now.
+            if !topLevelOnly {
+                let results = await analyzeCrossFolderWithPersistentCache(
+                    files: allFiles,
+                    threshold: similarityThreshold,
+                    progress: progress,
+                    shouldCancel: shouldCancel
+                )
+                await MainActor.run {
+                    progress?(stepComparing, 1.0)
+                    completion(shouldCancel?() == true ? [] : results)
+                }
+                return
+            }
+
+            var results: [ImageComparisonResult] = []
             let totalCount = allFiles.count
 
             // STEP 1: Hash ALL images (smooth 0→100%)
@@ -109,43 +127,33 @@ enum ImageAnalyzer {
                 return
             }
 
-            // STEP 2: Cluster observations
-            if topLevelOnly {
-                // Per-folder clustering
-                for dir in leafFolders {
-                    if shouldCancel?() == true { break }
+            // STEP 2: Per-folder clustering
+            for dir in leafFolders {
+                if shouldCancel?() == true { break }
 
-                    let files = await topLevelImageFilesAsync(
-                        in: dir,
-                        ignoredFolderName: ignoredFolderName,
-                        shouldCancel: shouldCancel
-                    )
-                    let fileSet = Set(files.map { $0.path })
+                let files = await topLevelImageFilesAsync(
+                    in: dir,
+                    ignoredFolderName: ignoredFolderName,
+                    shouldCancel: shouldCancel
+                )
+                let fileSet = Set(files.map { $0.path })
 
-                    let dirObs = zip(observations, paths).filter { _, p in fileSet.contains(p) }
-                    guard dirObs.count > 1 else {
-                        await Task.yield()
-                        continue
-                    }
-
-                    let obs = dirObs.map { $0.0 }
-                    let obsPaths = dirObs.map { $0.1 }
-
-                    let folderResults = await clusterFeaturePrintsOffMainActor(
-                        observations: obs, paths: obsPaths,
-                        threshold: similarityThreshold,
-                        progress: progress
-                    )
-                    results.append(contentsOf: folderResults)
+                let dirObs = zip(observations, paths).filter { _, p in fileSet.contains(p) }
+                guard dirObs.count > 1 else {
                     await Task.yield()
+                    continue
                 }
-            } else {
-                // Cluster all together
-                results = await clusterFeaturePrintsOffMainActor(
-                    observations: observations, paths: paths,
+
+                let obs = dirObs.map { $0.0 }
+                let obsPaths = dirObs.map { $0.1 }
+
+                let folderResults = await clusterFeaturePrintsOffMainActor(
+                    observations: obs, paths: obsPaths,
                     threshold: similarityThreshold,
                     progress: progress
                 )
+                results.append(contentsOf: folderResults)
+                await Task.yield()
             }
 
             await MainActor.run {
@@ -153,6 +161,193 @@ enum ImageAnalyzer {
                 completion(shouldCancel?() == true ? [] : results)
             }
         }
+    }
+
+    /// Exhaustively compares every image pair while keeping only two bounded feature blocks in RAM.
+    /// Vision feature generation and completed scan results are persisted between launches.
+    private nonisolated static func analyzeCrossFolderWithPersistentCache(
+        files: [URL],
+        threshold: Double,
+        progress: (@Sendable (String, Double) -> Void)?,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) async -> [ImageComparisonResult] {
+        guard !files.isEmpty, shouldCancel?() != true else { return [] }
+
+        do {
+            let cache = try EnhancedScanCache()
+            let descriptors = files.compactMap(CachedImageDescriptor.init(url:)).sorted { $0.path < $1.path }
+            guard !descriptors.isEmpty else { return [] }
+
+            // Generate only missing or invalidated feature prints. Each new observation is
+            // securely archived to SQLite and released before the next iteration.
+            for (index, descriptor) in descriptors.enumerated() {
+                if shouldCancel?() == true { return [] }
+                let isCached = try cache.hasCachedFeature(
+                    for: descriptor,
+                    revision: featurePrintRevision
+                )
+                if !isCached {
+                    let url = URL(fileURLWithPath: descriptor.path)
+                    guard let observation = await extractFeature(from: url) else {
+                        reportStepProgress(
+                            stepName: stepHashing,
+                            current: index + 1,
+                            total: descriptors.count,
+                            callback: progress
+                        )
+                        continue
+                    }
+                    try cache.storeFeature(
+                        observation,
+                        for: descriptor,
+                        revision: featurePrintRevision
+                    )
+                }
+                reportStepProgress(
+                    stepName: stepHashing,
+                    current: index + 1,
+                    total: descriptors.count,
+                    callback: progress
+                )
+                if index % 25 == 0 { await Task.yield() }
+            }
+
+            // Exclude files whose Vision request failed. A cache lookup also validates that an
+            // archive can still be decoded by the current framework.
+            var validDescriptors: [CachedImageDescriptor] = []
+            validDescriptors.reserveCapacity(descriptors.count)
+            for descriptor in descriptors {
+                if shouldCancel?() == true { return [] }
+                let isValid = try autoreleasepool {
+                    try cache.cachedFeature(for: descriptor, revision: featurePrintRevision) != nil
+                }
+                if isValid {
+                    validDescriptors.append(descriptor)
+                }
+            }
+            guard validDescriptors.count > 1 else { return [] }
+
+            let signature = imageSetSignature(validDescriptors, revision: featurePrintRevision)
+            if let reusable = try cache.reusableScan(
+                signature: signature,
+                requestedThreshold: threshold,
+                revision: featurePrintRevision
+            ) {
+                progress?(stepComparing, 1.0)
+                return try results(from: cache, scanID: reusable.id, threshold: threshold)
+            }
+
+            let scanID = try cache.beginScan(
+                signature: signature,
+                threshold: threshold,
+                revision: featurePrintRevision
+            )
+            do {
+                try cache.beginWritingMatches(scanID: scanID)
+                let n = Int64(validDescriptors.count)
+                let totalComparisons = n * (n - 1) / 2
+                var completedComparisons: Int64 = 0
+                let progressInterval = max(Int64(10_000), totalComparisons / 10_000)
+                let blockStarts = Array(stride(from: 0, to: validDescriptors.count, by: featureTileSize))
+
+                for (leftBlockIndex, leftStart) in blockStarts.enumerated() {
+                    if shouldCancel?() == true { throw CancellationError() }
+                    let leftEnd = min(leftStart + featureTileSize, validDescriptors.count)
+                    let left = try cache.loadFeatureBlock(
+                        validDescriptors[leftStart..<leftEnd],
+                        revision: featurePrintRevision
+                    )
+
+                    for rightBlockIndex in leftBlockIndex..<blockStarts.count {
+                        if shouldCancel?() == true { throw CancellationError() }
+                        let rightStart = blockStarts[rightBlockIndex]
+                        let rightEnd = min(rightStart + featureTileSize, validDescriptors.count)
+                        let right = rightBlockIndex == leftBlockIndex
+                            ? left
+                            : try cache.loadFeatureBlock(
+                                validDescriptors[rightStart..<rightEnd],
+                                revision: featurePrintRevision
+                            )
+
+                        for leftIndex in left.indices {
+                            let firstRightIndex = rightBlockIndex == leftBlockIndex ? leftIndex + 1 : 0
+                            guard firstRightIndex < right.count else { continue }
+                            for rightIndex in firstRightIndex..<right.count {
+                                var distance: Float = 0
+                                do {
+                                    try left[leftIndex].observation.computeDistance(
+                                        &distance,
+                                        to: right[rightIndex].observation
+                                    )
+                                    let similarity = 1.0 / (1.0 + Double(distance))
+                                    if similarity >= threshold {
+                                        try cache.appendMatch(
+                                            scanID: scanID,
+                                            reference: left[leftIndex].descriptor.path,
+                                            similar: right[rightIndex].descriptor.path,
+                                            similarity: similarity
+                                        )
+                                    }
+                                } catch let error as EnhancedScanCacheError {
+                                    throw error
+                                } catch {
+                                    // One incompatible pair should not invalidate the remaining scan.
+                                    print("Vision distance failed: \(error)")
+                                }
+
+                                completedComparisons += 1
+                                if completedComparisons % progressInterval == 0 || completedComparisons == totalComparisons {
+                                    let fraction = Double(completedComparisons) / Double(max(totalComparisons, 1))
+                                    progress?(stepComparing, fraction)
+                                }
+                            }
+                        }
+                        await Task.yield()
+                    }
+                }
+
+                try cache.finishWritingMatches(scanID: scanID)
+                return try results(from: cache, scanID: scanID, threshold: threshold)
+            } catch {
+                cache.abandonScan(scanID: scanID)
+                throw error
+            }
+        } catch is CancellationError {
+            return []
+        } catch {
+            print("Enhanced scan cache failed: \(error)")
+            return []
+        }
+    }
+
+    private nonisolated static func imageSetSignature(
+        _ descriptors: [CachedImageDescriptor],
+        revision: Int
+    ) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data("twinalyzer-feature-cache-v1\u{1f}\(revision)\n".utf8))
+        for descriptor in descriptors {
+            hasher.update(data: Data(descriptor.versionKey.utf8))
+            hasher.update(data: Data([0x0A]))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private nonisolated static func results(
+        from cache: EnhancedScanCache,
+        scanID: Int64,
+        threshold: Double
+    ) throws -> [ImageComparisonResult] {
+        var grouped: [String: [(path: String, percent: Double)]] = [:]
+        try cache.forEachMatch(scanID: scanID, threshold: threshold) { match in
+            grouped[match.reference, default: []].append((match.similar, match.similarity))
+        }
+        return grouped.map { reference, similars in
+            ImageComparisonResult(
+                reference: reference,
+                similars: similars.sorted { $0.percent > $1.percent }
+            )
+        }.sorted { ($0.similars.first?.percent ?? 0) > ($1.similars.first?.percent ?? 0) }
     }
 
     // MARK: - Perceptual Hash Analysis (Fast)
@@ -333,14 +528,15 @@ enum ImageAnalyzer {
             // Use autoreleasepool for the synchronous parts only
             autoreleasepool {
                 let request = VNGenerateImageFeaturePrintRequest()
+                request.revision = featurePrintRevision
 
-                // Load image with memory management
-                guard let ciImage = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-
-                let handler = VNImageRequestHandler(ciImage: ciImage, options: [:])
+                // Let Vision read from the file URL directly. This avoids retaining a lazily
+                // decoded CIImage and its backing store beyond the request.
+                let handler = VNImageRequestHandler(
+                    url: url,
+                    orientation: imageOrientation(at: url),
+                    options: [:]
+                )
 
                 do {
                     try handler.perform([request])
@@ -353,6 +549,18 @@ enum ImageAnalyzer {
                 }
             }
         }
+    }
+
+    private nonisolated static func imageOrientation(at url: URL) -> CGImagePropertyOrientation {
+        guard let source = CGImageSourceCreateWithURL(
+            url as CFURL,
+            [kCGImageSourceShouldCache: false] as CFDictionary
+        ), let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let rawOrientation = properties[kCGImagePropertyOrientation] as? UInt32,
+              let orientation = CGImagePropertyOrientation(rawValue: rawOrientation) else {
+            return .up
+        }
+        return orientation
     }
 
     /// Cluster feature prints on a background thread to avoid MainActor blocking
