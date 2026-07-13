@@ -69,6 +69,43 @@ nonisolated final class EnhancedScanCache: @unchecked Sendable {
     private var matchTransactionOpen = false
     private var pendingMatchCount = 0
 
+    static func databaseURL() throws -> URL {
+        let fileManager = FileManager.default
+        let baseURL = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        return baseURL
+            .appendingPathComponent("Twinalyzer", isDirectory: true)
+            .appendingPathComponent("EnhancedScanCache.sqlite3")
+    }
+
+    static func cacheSizeInBytes() throws -> Int64 {
+        let fileManager = FileManager.default
+        return try cacheFileURLs().reduce(into: Int64(0)) { total, url in
+            guard fileManager.fileExists(atPath: url.path) else { return }
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            total += Int64(values.fileSize ?? 0)
+        }
+    }
+
+    /// Removes the database and SQLite sidecar files. The caller must ensure no scan is active.
+    static func resetDatabase() throws {
+        let fileManager = FileManager.default
+        for url in try cacheFileURLs() where fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+    }
+
+    private static func cacheFileURLs() throws -> [URL] {
+        let databaseURL = try databaseURL()
+        return ["", "-wal", "-shm", "-journal"].map { suffix in
+            URL(fileURLWithPath: databaseURL.path + suffix)
+        }
+    }
+
     init(databaseURL providedDatabaseURL: URL? = nil) throws {
         let fileManager = FileManager.default
         let databaseURL: URL
@@ -79,15 +116,9 @@ nonisolated final class EnhancedScanCache: @unchecked Sendable {
                 withIntermediateDirectories: true
             )
         } else {
-            let baseURL = try fileManager.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let directory = baseURL.appendingPathComponent("Twinalyzer", isDirectory: true)
+            databaseURL = try Self.databaseURL()
+            let directory = databaseURL.deletingLastPathComponent()
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-            databaseURL = directory.appendingPathComponent("EnhancedScanCache.sqlite3")
         }
 
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX

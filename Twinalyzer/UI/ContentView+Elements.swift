@@ -759,6 +759,10 @@ struct SettingsPanelPopover: View {
     @FocusState private var textFieldFocused: Bool
     @State private var localSimilarity: Double = 0.8
     @State private var similarityDebounce: DispatchWorkItem?
+    @State private var enhancedScanCacheSize: Int64?
+    @State private var showResetDatabaseConfirmation = false
+    @State private var resetDatabaseError: String?
+    @State private var isResettingDatabase = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -919,7 +923,101 @@ struct SettingsPanelPopover: View {
                 }
             }
 
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Enhanced Scan Cache")
+                        .bold()
+                    Spacer()
+                    if let enhancedScanCacheSize {
+                        Text(Self.formattedCacheSize(enhancedScanCacheSize))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                Text("Stores Vision features and completed comparisons so unchanged images can be reused.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(role: .destructive) {
+                    showResetDatabaseConfirmation = true
+                } label: {
+                    Label("Reset Database", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(vm.isAnyOperationRunning || isResettingDatabase || (enhancedScanCacheSize ?? 0) == 0)
+                .help("Delete all cached Enhanced Scan features and completed comparisons")
+            }
+
         }
         .padding(20)
+        .frame(width: 320)
+        .task {
+            await refreshCacheSize()
+        }
+        .confirmationDialog(
+            "Reset Enhanced Scan Database?",
+            isPresented: $showResetDatabaseConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Database", role: .destructive) {
+                resetDatabase()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Cached Vision features and completed scan results will be deleted. Your original images will not be affected.")
+        }
+        .alert(
+            "Could Not Reset Database",
+            isPresented: Binding(
+                get: { resetDatabaseError != nil },
+                set: { if !$0 { resetDatabaseError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { resetDatabaseError = nil }
+        } message: {
+            Text(resetDatabaseError ?? "Unknown error")
+        }
+    }
+
+    private static func formattedCacheSize(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "Empty" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private func refreshCacheSize() async {
+        let size = await Task.detached(priority: .utility) {
+            (try? EnhancedScanCache.cacheSizeInBytes()) ?? 0
+        }.value
+        guard !Task.isCancelled else { return }
+        enhancedScanCacheSize = size
+    }
+
+    private func resetDatabase() {
+        guard !vm.isAnyOperationRunning, !isResettingDatabase else { return }
+        isResettingDatabase = true
+        Task {
+            let errorMessage = await Task.detached(priority: .utility) { () -> String? in
+                do {
+                    try EnhancedScanCache.resetDatabase()
+                    return nil
+                } catch {
+                    return String(describing: error)
+                }
+            }.value
+
+            isResettingDatabase = false
+            if let errorMessage {
+                resetDatabaseError = errorMessage
+            }
+            await refreshCacheSize()
+        }
     }
 }
