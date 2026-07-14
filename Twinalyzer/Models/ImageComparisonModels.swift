@@ -7,6 +7,12 @@
 
 import Foundation
 
+struct EnhancedScanReuseStatus: Sendable, Equatable {
+    let unchangedImages: Int
+    let newOrModifiedImages: Int
+    let requiredComparisons: Int64
+}
+
 // MARK: - Analysis Configuration Models
 enum AnalysisMode: String, CaseIterable, Identifiable, RawRepresentable {
     case deepFeature = "Enhanced Scan"

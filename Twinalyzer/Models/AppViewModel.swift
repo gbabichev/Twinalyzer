@@ -42,6 +42,7 @@ final class AppViewModel: ObservableObject {
     @Published var isProcessing: Bool = false
     @Published var processingProgress: Double? = nil
     @Published var processingStepName: String = ""
+    @Published var enhancedScanReuseStatus: EnhancedScanReuseStatus?
     @Published var processingETA: TimeInterval? = nil
     @Published var isDiscoveringFolders: Bool = false
     @Published var comparisonResults: [ImageComparisonResult] = [] {
@@ -533,12 +534,19 @@ final class AppViewModel: ObservableObject {
         processingProgress = 0.0
         processingETA = nil
         processingStartTime = Date()
+        enhancedScanReuseStatus = nil
         startBadgeUpdater()
 
         let leafFolders = activeLeafFolders
         let threshold = similarityThreshold
         let topOnly = scanTopLevelOnly
         let ignoredFolder = ignoredFolderName
+
+        let reuseStatusWrapper: @Sendable (EnhancedScanReuseStatus) -> Void = { [weak self] status in
+            Task { @MainActor in
+                self?.enhancedScanReuseStatus = status
+            }
+        }
 
         let progressWrapper: @Sendable (String, Double) -> Void = { [weak self] stepName, p in
             Task { @MainActor in
@@ -571,6 +579,7 @@ final class AppViewModel: ObservableObject {
                             topLevelOnly: topOnly,
                             ignoredFolderName: ignoredFolder,
                             progress: progressWrapper,
+                            reuseStatus: reuseStatusWrapper,
                             shouldCancel: { Task.isCancelled },
                             completion: { results in continuation.resume(returning: results) }
                         )
@@ -771,6 +780,7 @@ final class AppViewModel: ObservableObject {
         isProcessing = false
         isDiscoveringFolders = false
         processingProgress = nil
+        enhancedScanReuseStatus = nil
     }
     
     private func cancelAllOperations() {

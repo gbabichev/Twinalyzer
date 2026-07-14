@@ -58,6 +58,11 @@ nonisolated final class EnhancedScanCache: @unchecked Sendable {
         let minimumThreshold: Double
     }
 
+    struct ReusableCoverage: Sendable {
+        let scanID: Int64
+        let reusablePaths: Set<String>
+    }
+
     struct StoredMatch: Sendable {
         let reference: String
         let similar: String
@@ -270,6 +275,89 @@ nonisolated final class EnhancedScanCache: @unchecked Sendable {
         )
     }
 
+    /// Stages the current, versioned image set in a temporary table. This supports efficient
+    /// overlap queries without constructing enormous SQL IN clauses.
+    func prepareCurrentImageSet(_ descriptors: [CachedImageDescriptor]) throws {
+        try execute("""
+            CREATE TEMP TABLE IF NOT EXISTS current_images(
+                path TEXT PRIMARY KEY,
+                version_key TEXT NOT NULL
+            ) WITHOUT ROWID
+            """)
+        try execute("DELETE FROM current_images")
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let statement = try prepare("INSERT INTO current_images(path, version_key) VALUES(?, ?)")
+            defer { sqlite3_finalize(statement) }
+            for descriptor in descriptors {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                bind(descriptor.path, to: 1, in: statement)
+                bind(descriptor.versionKey, to: 2, in: statement)
+                try stepDone(statement)
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    /// Backfills membership for exact-match scans created by older cache schema versions.
+    func recordCurrentImageSet(for scanID: Int64) throws {
+        let statement = try prepare("""
+            INSERT OR REPLACE INTO scan_images(scan_id, path, version_key)
+            SELECT ?, path, version_key FROM current_images
+            """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, scanID)
+        try stepDone(statement)
+    }
+
+    /// Chooses the completed scan that covers the largest unchanged subset of the current set.
+    /// Only scans performed at an equal or lower threshold can prove coverage at the requested
+    /// threshold.
+    func bestReusableCoverage(
+        requestedThreshold: Double,
+        revision: Int
+    ) throws -> ReusableCoverage? {
+        let statement = try prepare("""
+            SELECT s.id, COUNT(*) AS overlap_count
+            FROM scans s
+            JOIN scan_images si ON si.scan_id = s.id
+            JOIN current_images ci
+              ON ci.path = si.path AND ci.version_key = si.version_key
+            WHERE s.vision_revision = ? AND s.completed = 1
+              AND s.minimum_threshold <= ?
+            GROUP BY s.id
+            HAVING overlap_count >= 2
+            ORDER BY overlap_count DESC, s.minimum_threshold DESC, s.created_at DESC
+            LIMIT 1
+            """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int(statement, 1, Int32(revision))
+        sqlite3_bind_double(statement, 2, requestedThreshold + 1e-12)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let scanID = sqlite3_column_int64(statement, 0)
+
+        let pathsStatement = try prepare("""
+            SELECT ci.path
+            FROM current_images ci
+            JOIN scan_images si
+              ON si.path = ci.path AND si.version_key = ci.version_key
+            WHERE si.scan_id = ?
+            """)
+        defer { sqlite3_finalize(pathsStatement) }
+        sqlite3_bind_int64(pathsStatement, 1, scanID)
+        var paths = Set<String>()
+        while sqlite3_step(pathsStatement) == SQLITE_ROW {
+            if let text = sqlite3_column_text(pathsStatement, 0) {
+                paths.insert(String(cString: text))
+            }
+        }
+        return ReusableCoverage(scanID: scanID, reusablePaths: paths)
+    }
+
     func beginScan(signature: String, threshold: Double, revision: Int) throws -> Int64 {
         let delete = try prepare("""
             DELETE FROM scans
@@ -291,7 +379,11 @@ nonisolated final class EnhancedScanCache: @unchecked Sendable {
         sqlite3_bind_int(insert, 3, Int32(revision))
         sqlite3_bind_double(insert, 4, Date().timeIntervalSince1970)
         try stepDone(insert)
-        return sqlite3_last_insert_rowid(db)
+        let scanID = sqlite3_last_insert_rowid(db)
+
+        // current_images was populated immediately before this call.
+        try recordCurrentImageSet(for: scanID)
+        return scanID
     }
 
     func beginWritingMatches(scanID: Int64) throws {
@@ -325,6 +417,47 @@ nonisolated final class EnhancedScanCache: @unchecked Sendable {
             try execute("BEGIN IMMEDIATE")
             pendingMatchCount = 0
         }
+    }
+
+    /// Copies qualifying matches whose two endpoints are both covered by the prior scan.
+    @discardableResult
+    func copyReusableMatches(
+        from sourceScanID: Int64,
+        to destinationScanID: Int64,
+        threshold: Double
+    ) throws -> Int {
+        guard matchTransactionOpen else {
+            throw EnhancedScanCacheError.sqlite("Match transaction is not open")
+        }
+        let statement = try prepare("""
+            INSERT OR REPLACE INTO matches(scan_id, reference_path, similar_path, similarity)
+            SELECT ?, m.reference_path, m.similar_path, m.similarity
+            FROM matches m
+            JOIN current_images reference_image ON reference_image.path = m.reference_path
+            JOIN scan_images source_reference
+              ON source_reference.scan_id = m.scan_id
+             AND source_reference.path = m.reference_path
+             AND source_reference.version_key = reference_image.version_key
+            JOIN current_images similar_image ON similar_image.path = m.similar_path
+            JOIN scan_images source_similar
+              ON source_similar.scan_id = m.scan_id
+             AND source_similar.path = m.similar_path
+             AND source_similar.version_key = similar_image.version_key
+            WHERE m.scan_id = ? AND m.similarity >= ?
+            """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, destinationScanID)
+        sqlite3_bind_int64(statement, 2, sourceScanID)
+        sqlite3_bind_double(statement, 3, threshold)
+        try stepDone(statement)
+        let copiedCount = Int(sqlite3_changes(db))
+
+        // The bulk copy may be large. Commit it before starting incremental inserts so the WAL
+        // does not hold the entire derived scan in one transaction.
+        try execute("COMMIT")
+        try execute("BEGIN IMMEDIATE")
+        pendingMatchCount = 0
+        return copiedCount
     }
 
     func finishWritingMatches(scanID: Int64) throws {
@@ -418,6 +551,18 @@ nonisolated final class EnhancedScanCache: @unchecked Sendable {
         try execute("""
             CREATE INDEX IF NOT EXISTS scans_lookup
             ON scans(image_set_signature, vision_revision, completed, minimum_threshold)
+            """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS scan_images(
+                scan_id INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+                path TEXT NOT NULL,
+                version_key TEXT NOT NULL,
+                PRIMARY KEY(scan_id, path)
+            ) WITHOUT ROWID
+            """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS scan_images_version_lookup
+            ON scan_images(path, version_key, scan_id)
             """)
         try execute("""
             CREATE TABLE IF NOT EXISTS matches(

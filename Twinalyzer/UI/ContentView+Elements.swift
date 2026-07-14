@@ -102,6 +102,17 @@ extension ContentView {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    if let cacheStatus = vm.enhancedScanReuseStatus {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(cacheStatus.unchangedImages.formatted()) unchanged images reused")
+                            Text("\(cacheStatus.newOrModifiedImages.formatted()) new or modified images")
+                            Text("\(cacheStatus.requiredComparisons.formatted()) new comparisons required")
+                        }
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: columnWidth, alignment: .center)
+                        .padding(.top, 4)
+                    }
                 } else {
                     ProgressView()
                         .frame(width: columnWidth)

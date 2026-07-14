@@ -67,6 +67,7 @@ enum ImageAnalyzer {
         topLevelOnly: Bool,
         ignoredFolderName: String = "",
         progress: (@Sendable (String, Double) -> Void)? = nil,
+        reuseStatus: (@Sendable (EnhancedScanReuseStatus) -> Void)? = nil,
         shouldCancel: (@Sendable () -> Bool)? = nil,
         completion: @escaping @Sendable ([ImageComparisonResult]) -> Void
     ) {
@@ -91,6 +92,7 @@ enum ImageAnalyzer {
                     files: allFiles,
                     threshold: similarityThreshold,
                     progress: progress,
+                    reuseStatus: reuseStatus,
                     shouldCancel: shouldCancel
                 )
                 await MainActor.run {
@@ -169,6 +171,7 @@ enum ImageAnalyzer {
         files: [URL],
         threshold: Double,
         progress: (@Sendable (String, Double) -> Void)?,
+        reuseStatus: (@Sendable (EnhancedScanReuseStatus) -> Void)?,
         shouldCancel: (@Sendable () -> Bool)?
     ) async -> [ImageComparisonResult] {
         guard !files.isEmpty, shouldCancel?() != true else { return [] }
@@ -227,15 +230,42 @@ enum ImageAnalyzer {
             }
             guard validDescriptors.count > 1 else { return [] }
 
+            try cache.prepareCurrentImageSet(validDescriptors)
             let signature = imageSetSignature(validDescriptors, revision: featurePrintRevision)
             if let reusable = try cache.reusableScan(
                 signature: signature,
                 requestedThreshold: threshold,
                 revision: featurePrintRevision
             ) {
+                try cache.recordCurrentImageSet(for: reusable.id)
+                reportReuseStatus(
+                    unchangedImages: validDescriptors.count,
+                    newOrModifiedImages: 0,
+                    requiredComparisons: 0,
+                    callback: reuseStatus
+                )
                 progress?(stepComparing, 1.0)
                 return try results(from: cache, scanID: reusable.id, threshold: threshold)
             }
+
+            let priorCoverage = try cache.bestReusableCoverage(
+                requestedThreshold: threshold,
+                revision: featurePrintRevision
+            )
+            let reusablePaths = priorCoverage?.reusablePaths ?? []
+            let reusedDescriptors = validDescriptors.filter { reusablePaths.contains($0.path) }
+            let uncoveredDescriptors = validDescriptors.filter { !reusablePaths.contains($0.path) }
+
+            let uncoveredCount = Int64(uncoveredDescriptors.count)
+            let reusedCount = Int64(reusedDescriptors.count)
+            let totalComparisons = uncoveredCount * (uncoveredCount - 1) / 2
+                + uncoveredCount * reusedCount
+            reportReuseStatus(
+                unchangedImages: reusedDescriptors.count,
+                newOrModifiedImages: uncoveredDescriptors.count,
+                requiredComparisons: totalComparisons,
+                callback: reuseStatus
+            )
 
             let scanID = try cache.beginScan(
                 signature: signature,
@@ -244,66 +274,97 @@ enum ImageAnalyzer {
             )
             do {
                 try cache.beginWritingMatches(scanID: scanID)
-                let n = Int64(validDescriptors.count)
-                let totalComparisons = n * (n - 1) / 2
+                if let priorCoverage {
+                    try cache.copyReusableMatches(
+                        from: priorCoverage.scanID,
+                        to: scanID,
+                        threshold: threshold
+                    )
+                }
+
                 var completedComparisons: Int64 = 0
                 let progressInterval = max(Int64(10_000), totalComparisons / 10_000)
-                let blockStarts = Array(stride(from: 0, to: validDescriptors.count, by: featureTileSize))
+                let uncoveredBlockStarts = Array(
+                    stride(from: 0, to: uncoveredDescriptors.count, by: featureTileSize)
+                )
 
-                for (leftBlockIndex, leftStart) in blockStarts.enumerated() {
+                // Compare every uncovered image with every other uncovered image.
+                for (leftBlockIndex, leftStart) in uncoveredBlockStarts.enumerated() {
                     if shouldCancel?() == true { throw CancellationError() }
-                    let leftEnd = min(leftStart + featureTileSize, validDescriptors.count)
+                    let leftEnd = min(leftStart + featureTileSize, uncoveredDescriptors.count)
                     let left = try cache.loadFeatureBlock(
-                        validDescriptors[leftStart..<leftEnd],
+                        uncoveredDescriptors[leftStart..<leftEnd],
                         revision: featurePrintRevision
                     )
 
-                    for rightBlockIndex in leftBlockIndex..<blockStarts.count {
+                    for rightBlockIndex in leftBlockIndex..<uncoveredBlockStarts.count {
                         if shouldCancel?() == true { throw CancellationError() }
-                        let rightStart = blockStarts[rightBlockIndex]
-                        let rightEnd = min(rightStart + featureTileSize, validDescriptors.count)
+                        let rightStart = uncoveredBlockStarts[rightBlockIndex]
+                        let rightEnd = min(rightStart + featureTileSize, uncoveredDescriptors.count)
                         let right = rightBlockIndex == leftBlockIndex
                             ? left
                             : try cache.loadFeatureBlock(
-                                validDescriptors[rightStart..<rightEnd],
+                                uncoveredDescriptors[rightStart..<rightEnd],
                                 revision: featurePrintRevision
                             )
-
-                        for leftIndex in left.indices {
-                            let firstRightIndex = rightBlockIndex == leftBlockIndex ? leftIndex + 1 : 0
-                            guard firstRightIndex < right.count else { continue }
-                            for rightIndex in firstRightIndex..<right.count {
-                                var distance: Float = 0
-                                do {
-                                    try left[leftIndex].observation.computeDistance(
-                                        &distance,
-                                        to: right[rightIndex].observation
-                                    )
-                                    let similarity = 1.0 / (1.0 + Double(distance))
-                                    if similarity >= threshold {
-                                        try cache.appendMatch(
-                                            scanID: scanID,
-                                            reference: left[leftIndex].descriptor.path,
-                                            similar: right[rightIndex].descriptor.path,
-                                            similarity: similarity
-                                        )
-                                    }
-                                } catch let error as EnhancedScanCacheError {
-                                    throw error
-                                } catch {
-                                    // One incompatible pair should not invalidate the remaining scan.
-                                    print("Vision distance failed: \(error)")
-                                }
-
-                                completedComparisons += 1
-                                if completedComparisons % progressInterval == 0 || completedComparisons == totalComparisons {
-                                    let fraction = Double(completedComparisons) / Double(max(totalComparisons, 1))
-                                    progress?(stepComparing, fraction)
-                                }
-                            }
-                        }
+                        try compareFeatureBlocks(
+                            left,
+                            right,
+                            diagonal: rightBlockIndex == leftBlockIndex,
+                            cache: cache,
+                            scanID: scanID,
+                            threshold: threshold,
+                            completedComparisons: &completedComparisons,
+                            totalComparisons: totalComparisons,
+                            progressInterval: progressInterval,
+                            progress: progress,
+                            shouldCancel: shouldCancel
+                        )
                         await Task.yield()
                     }
+                }
+
+                // Prior coverage accounts for every reused↔reused pair. Only the cross product
+                // between uncovered and reused images remains.
+                let reusedBlockStarts = Array(
+                    stride(from: 0, to: reusedDescriptors.count, by: featureTileSize)
+                )
+                for uncoveredStart in uncoveredBlockStarts {
+                    if shouldCancel?() == true { throw CancellationError() }
+                    let uncoveredEnd = min(
+                        uncoveredStart + featureTileSize,
+                        uncoveredDescriptors.count
+                    )
+                    let uncoveredBlock = try cache.loadFeatureBlock(
+                        uncoveredDescriptors[uncoveredStart..<uncoveredEnd],
+                        revision: featurePrintRevision
+                    )
+                    for reusedStart in reusedBlockStarts {
+                        if shouldCancel?() == true { throw CancellationError() }
+                        let reusedEnd = min(reusedStart + featureTileSize, reusedDescriptors.count)
+                        let reusedBlock = try cache.loadFeatureBlock(
+                            reusedDescriptors[reusedStart..<reusedEnd],
+                            revision: featurePrintRevision
+                        )
+                        try compareFeatureBlocks(
+                            uncoveredBlock,
+                            reusedBlock,
+                            diagonal: false,
+                            cache: cache,
+                            scanID: scanID,
+                            threshold: threshold,
+                            completedComparisons: &completedComparisons,
+                            totalComparisons: totalComparisons,
+                            progressInterval: progressInterval,
+                            progress: progress,
+                            shouldCancel: shouldCancel
+                        )
+                        await Task.yield()
+                    }
+                }
+
+                if totalComparisons == 0 {
+                    progress?(stepComparing, 1.0)
                 }
 
                 try cache.finishWritingMatches(scanID: scanID)
@@ -317,6 +378,78 @@ enum ImageAnalyzer {
         } catch {
             print("Enhanced scan cache failed: \(error)")
             return []
+        }
+    }
+
+    private nonisolated static func reportReuseStatus(
+        unchangedImages: Int,
+        newOrModifiedImages: Int,
+        requiredComparisons: Int64,
+        callback: (@Sendable (EnhancedScanReuseStatus) -> Void)?
+    ) {
+        let status = EnhancedScanReuseStatus(
+            unchangedImages: unchangedImages,
+            newOrModifiedImages: newOrModifiedImages,
+            requiredComparisons: requiredComparisons
+        )
+        print(
+            "Enhanced Scan cache: \(unchangedImages) unchanged images reused; "
+                + "\(newOrModifiedImages) new or modified images; "
+                + "\(requiredComparisons) new comparisons required"
+        )
+        callback?(status)
+    }
+
+    private nonisolated static func compareFeatureBlocks(
+        _ left: [(descriptor: CachedImageDescriptor, observation: VNFeaturePrintObservation)],
+        _ right: [(descriptor: CachedImageDescriptor, observation: VNFeaturePrintObservation)],
+        diagonal: Bool,
+        cache: EnhancedScanCache,
+        scanID: Int64,
+        threshold: Double,
+        completedComparisons: inout Int64,
+        totalComparisons: Int64,
+        progressInterval: Int64,
+        progress: (@Sendable (String, Double) -> Void)?,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) throws {
+        for leftIndex in left.indices {
+            let firstRightIndex = diagonal ? leftIndex + 1 : 0
+            guard firstRightIndex < right.count else { continue }
+            for rightIndex in firstRightIndex..<right.count {
+                if completedComparisons % 4_096 == 0, shouldCancel?() == true {
+                    throw CancellationError()
+                }
+                var distance: Float = 0
+                do {
+                    try left[leftIndex].observation.computeDistance(
+                        &distance,
+                        to: right[rightIndex].observation
+                    )
+                    let similarity = 1.0 / (1.0 + Double(distance))
+                    if similarity >= threshold {
+                        let leftPath = left[leftIndex].descriptor.path
+                        let rightPath = right[rightIndex].descriptor.path
+                        try cache.appendMatch(
+                            scanID: scanID,
+                            reference: min(leftPath, rightPath),
+                            similar: max(leftPath, rightPath),
+                            similarity: similarity
+                        )
+                    }
+                } catch let error as EnhancedScanCacheError {
+                    throw error
+                } catch {
+                    print("Vision distance failed: \(error)")
+                }
+
+                completedComparisons += 1
+                if completedComparisons % progressInterval == 0
+                    || completedComparisons == totalComparisons {
+                    let fraction = Double(completedComparisons) / Double(max(totalComparisons, 1))
+                    progress?(stepComparing, fraction)
+                }
+            }
         }
     }
 
