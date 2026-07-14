@@ -63,7 +63,7 @@ struct ContentView: View {
         guard let firstID = debouncedSelection.first else { return nil }
         return displayedRows.first(where: { $0.id == firstID })
     }
-    
+
     // MARK: - Quick Look Navigation (without taking focus)
     private func quickLookGoPrevious() { QuickLookPreview.shared.goPrevious() }
     private func quickLookGoNext() { QuickLookPreview.shared.goNext() }
@@ -395,6 +395,9 @@ struct ContentView: View {
             defaultFilename: vm.exportFilename
         ) { result in
             vm.handleCSVExportResult(result)
+        }
+        .sheet(isPresented: $vm.showMatchedFolderDeletionSheet) {
+            MatchedFolderDeletionSheet(vm: vm)
         }
         .alert("No Results Found", isPresented: $vm.showNoResultsAlert) {
             Button("OK") { }

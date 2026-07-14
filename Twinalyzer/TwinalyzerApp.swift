@@ -105,11 +105,11 @@ struct ActionsCommands: Commands {
             Divider()
 
             Button {
-                viewModel.deleteMatchedFolders()
+                viewModel.requestMatchedFolderDeletion()
             } label: {
                 Label("Delete Matched Folders", systemImage: "folder.badge.minus")
             }
-            .disabled(viewModel.isAnyOperationRunning || viewModel.orderedCrossFolderPairsStatic.isEmpty)
+            .disabled(viewModel.isAnyOperationRunning || viewModel.matchedFolderDeletionParentOptions.isEmpty)
 
             Divider()
 

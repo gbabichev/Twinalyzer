@@ -281,6 +281,15 @@ private struct DuplicatesFolderPanel: View {
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 }
+                Button {
+                    vm.requestMatchedFolderDeletion()
+                } label: {
+                    Image(systemName: "folder.badge.minus")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.isAnyOperationRunning || vm.matchedFolderDeletionParentOptions.isEmpty)
+                .help("Choose a parent folder and preview matched subfolders to move to Trash")
                 Button(action: { withAnimation(.easeInOut) { isMinimized.toggle() } }) {
                     Image(systemName: isMinimized ? "chevron.up" : "chevron.down")
                         .padding(.trailing, 10)
@@ -391,6 +400,130 @@ private struct DuplicatesFolderPanel: View {
         // When minimized, suggest a compact height to the split view
         .frame(minHeight: isMinimized ? 32 : 150, idealHeight: isMinimized ? 36 : 200)
         .animation(.easeInOut(duration: 0.2), value: isMinimized)
+    }
+}
+
+struct MatchedFolderDeletionSheet: View {
+    @ObservedObject var vm: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedParentPath = ""
+
+    private var options: [AppViewModel.MatchedFolderDeletionParentOption] {
+        vm.matchedFolderDeletionParentOptions
+    }
+
+    private var selectedOption: AppViewModel.MatchedFolderDeletionParentOption? {
+        options.first { $0.path == selectedParentPath } ?? options.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: "folder.badge.minus")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Delete Matched Subfolders")
+                        .font(.title2.weight(.semibold))
+                    Text("Choose which parent folder Twinalyzer may delete from.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Picker("Delete from", selection: $selectedParentPath) {
+                ForEach(options) { option in
+                    Text("\(option.displayName) — \(option.candidates.count) folder\(option.candidates.count == 1 ? "" : "s")")
+                        .tag(option.path)
+                }
+            }
+
+            if let option = selectedOption {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(option.path)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    Text("Only subfolders below this parent with matches outside this parent are included. Internal matches are ignored.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                GroupBox("Folders that will be moved to Trash") {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(option.candidates) { candidate in
+                                HStack(spacing: 10) {
+                                    Image(systemName: "folder.fill")
+                                        .foregroundStyle(.secondary)
+                                    Text(candidate.relativePath)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer()
+                                    Text("×\(candidate.externalMatchCount)")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                if candidate.id != option.candidates.last?.id {
+                                    Divider()
+                                }
+                            }
+                        }
+                        .padding(8)
+                    }
+                    .frame(minHeight: 180, maxHeight: 300)
+                }
+            } else {
+                ContentUnavailableView(
+                    "No Deletion Candidates",
+                    systemImage: "folder.badge.questionmark",
+                    description: Text("No selected parent contains a folder matched outside that parent.")
+                )
+            }
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(role: .destructive) {
+                    guard let option = selectedOption else { return }
+                    vm.deleteMatchedFolders(underParentPath: option.path)
+                    if vm.matchedFolderDeletionErrorMessage == nil {
+                        dismiss()
+                    }
+                } label: {
+                    Text("Move \(selectedOption?.candidates.count ?? 0) Folder\((selectedOption?.candidates.count ?? 0) == 1 ? "" : "s") to Trash")
+                }
+                .disabled(selectedOption?.candidates.isEmpty != false)
+            }
+        }
+        .padding(20)
+        .frame(width: 620)
+        .frame(minHeight: 430)
+        .onAppear {
+            if selectedParentPath.isEmpty {
+                selectedParentPath = options.first?.path ?? ""
+            }
+        }
+        .onChange(of: options) { _, newOptions in
+            if !newOptions.contains(where: { $0.path == selectedParentPath }) {
+                selectedParentPath = newOptions.first?.path ?? ""
+            }
+        }
+        .alert(
+            "Some Folders Could Not Be Deleted",
+            isPresented: Binding(
+                get: { vm.matchedFolderDeletionErrorMessage != nil },
+                set: { if !$0 { vm.matchedFolderDeletionErrorMessage = nil } }
+            )
+        ) {
+            Button("Close", role: .cancel) {
+                vm.matchedFolderDeletionErrorMessage = nil
+                dismiss()
+            }
+        } message: {
+            Text(vm.matchedFolderDeletionErrorMessage ?? "Unknown error")
+        }
     }
 }
     

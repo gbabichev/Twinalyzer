@@ -21,6 +21,8 @@ final class AppViewModel: ObservableObject {
     // MARK: - No Results Popup
     @Published var showNoResultsAlert = false
     @Published var noResultsAlertMessage = ""
+    @Published var showMatchedFolderDeletionSheet = false
+    @Published var matchedFolderDeletionErrorMessage: String?
     
     // MARK: - CSV Export
     @Published var isExportingCSV = false
@@ -71,6 +73,20 @@ final class AppViewModel: ObservableObject {
         let count: Int
     }
     @Published var orderedCrossFolderPairsStatic: [OrderedFolderPair] = []
+
+    struct MatchedFolderDeletionCandidate: Identifiable, Hashable {
+        var id: String { path }
+        let path: String
+        let relativePath: String
+        let externalMatchCount: Int
+    }
+
+    struct MatchedFolderDeletionParentOption: Identifiable, Hashable {
+        var id: String { path }
+        let path: String
+        let displayName: String
+        let candidates: [MatchedFolderDeletionCandidate]
+    }
     
     
     // MARK: - Performance Cache Storage
@@ -962,25 +978,85 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func deleteMatchedFolders() {
-        // Collect all "match" folders from cross-folder duplicate pairs
-        let foldersToDelete = Set(orderedCrossFolderPairsStatic.map { $0.match })
+    var matchedFolderDeletionParentOptions: [MatchedFolderDeletionParentOption] {
+        var seenRoots = Set<String>()
+        return selectedParentFolders.compactMap { parentURL in
+            let parent = parentURL.standardizedFileURL
+            guard seenRoots.insert(parent.path).inserted else { return nil }
 
-        guard !foldersToDelete.isEmpty else { return }
+            var counts: [String: Int] = [:]
+            for pair in orderedCrossFolderPairsStatic {
+                let referenceInside = isDescendant(
+                    URL(fileURLWithPath: pair.reference, isDirectory: true),
+                    of: parent
+                )
+                let matchInside = isDescendant(
+                    URL(fileURLWithPath: pair.match, isDirectory: true),
+                    of: parent
+                )
 
-        // Delete each folder
-        for folderPath in foldersToDelete {
+                // Only select the endpoint under this parent when its counterpart is outside.
+                // Relationships wholly inside the chosen parent are intentionally ignored.
+                guard referenceInside != matchInside else { continue }
+                let candidatePath = referenceInside ? pair.reference : pair.match
+                counts[candidatePath, default: 0] += pair.count
+            }
+
+            let candidates = counts.map { path, count in
+                MatchedFolderDeletionCandidate(
+                    path: path,
+                    relativePath: relativePath(path, under: parent.path),
+                    externalMatchCount: count
+                )
+            }.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+
+            guard !candidates.isEmpty else { return nil }
+            return MatchedFolderDeletionParentOption(
+                path: parent.path,
+                displayName: parent.lastPathComponent,
+                candidates: candidates
+            )
+        }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    func requestMatchedFolderDeletion() {
+        guard !isAnyOperationRunning, !matchedFolderDeletionParentOptions.isEmpty else { return }
+        matchedFolderDeletionErrorMessage = nil
+        showMatchedFolderDeletionSheet = true
+    }
+
+    func deleteMatchedFolders(underParentPath parentPath: String) {
+        guard !isAnyOperationRunning,
+              let option = matchedFolderDeletionParentOptions.first(where: { $0.path == parentPath }) else {
+            return
+        }
+
+        var deletedPaths = Set<String>()
+        var failures: [String] = []
+        for candidate in option.candidates {
             do {
-                let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
-                try FileManager.default.trashItem(at: folderURL, resultingItemURL: nil)
-                print("Moved folder to trash: \(folderPath)")
+                try FileManager.default.trashItem(
+                    at: URL(fileURLWithPath: candidate.path, isDirectory: true),
+                    resultingItemURL: nil
+                )
+                deletedPaths.insert(candidate.path)
+                print("Moved folder to trash: \(candidate.path)")
             } catch {
+                failures.append("\(candidate.relativePath): \(error.localizedDescription)")
                 print("Failed to move folder to trash: \(error.localizedDescription)")
             }
         }
 
-        // Remove the deleted folders from discovered leaf folders and exclusions
-        let deletedURLs = Set(foldersToDelete.map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL })
+        showMatchedFolderDeletionSheet = !failures.isEmpty
+        if !failures.isEmpty {
+            matchedFolderDeletionErrorMessage = failures.joined(separator: "\n")
+        }
+        guard !deletedPaths.isEmpty else { return }
+
+        // Remove only folders that were successfully moved to Trash.
+        let deletedURLs = Set(deletedPaths.map {
+            URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL
+        })
         discoveredLeafFolders.removeAll { deletedURLs.contains($0.standardizedFileURL) }
         excludedLeafFolders = excludedLeafFolders.filter { !deletedURLs.contains($0.standardizedFileURL) }
 
@@ -994,6 +1070,14 @@ final class AppViewModel: ObservableObject {
         crossFolderDuplicateCountsStatic.removeAll()
         folderDisplayNamesStatic.removeAll()
         orderedCrossFolderPairsStatic.removeAll()
+    }
+
+    private func relativePath(_ path: String, under parentPath: String) -> String {
+        let pathComponents = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+        let parentComponents = URL(fileURLWithPath: parentPath).standardizedFileURL.pathComponents
+        guard pathComponents.starts(with: parentComponents) else { return path }
+        let relativeComponents = pathComponents.dropFirst(parentComponents.count)
+        return relativeComponents.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : relativeComponents.joined(separator: "/")
     }
     
     
