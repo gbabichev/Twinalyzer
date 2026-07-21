@@ -975,16 +975,13 @@ struct SettingsPanelPopover: View {
 
             if vm.selectedAnalysisMode == .perceptualHash {
                 let thresholdPercent = Int(round(vm.similarityThreshold * 100))
-                Text(
+                scanAdviceCard(
                     thresholdPercent < 98
                     ? "Basic Scan is only effective at 98-100% matches. Your current threshold (\(thresholdPercent)%) will likely produce many false positives."
                     : "Basic Scan works best for near-exact duplicates in the 98-100% range."
                 )
-                .font(.footnote)
-                .foregroundStyle(.red)
-                .multilineTextAlignment(.leading)
-                .frame(width: 280, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                scanAdviceCard("First Enhanced Scan? Start at the lowest similarity you realistically expect to use (about 66-70% is usually practical). Raising it later reuses cached results; lowering it later requires another full comparison pass.")
             }
             
             Text("Similarity Threshold")
@@ -1134,6 +1131,29 @@ struct SettingsPanelPopover: View {
     private static func formattedCacheSize(_ bytes: Int64) -> String {
         guard bytes > 0 else { return "Empty" }
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private func scanAdviceCard(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.red)
+                .padding(.top, 1)
+
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(width: 280, alignment: .leading)
+        .background(Color.red.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.red.opacity(0.22), lineWidth: 1)
+        }
     }
 
     private func refreshCacheSize() async {
