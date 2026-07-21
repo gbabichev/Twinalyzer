@@ -65,6 +65,10 @@ open twinalyzer.xcodeproj
 
 ## 📝 Changelog
 
+### 1.4.0
+- Added a database for Enhanced Scans, to improve re-scanning speed. 
+- Enhanced interface of 'delete matched folders' overlay. 
+
 ### 1.3.0
 - Significantly improved performance of image scanning. 
 - Improved scanning interface. 
