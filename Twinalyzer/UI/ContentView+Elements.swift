@@ -71,15 +71,20 @@ extension ContentView {
         VStack(spacing: 16) {
             // Header icon and title
             VStack(spacing: 6) {
-                Image(systemName: vm.isDiscoveringFolders ? "folder.badge.gearshape" : "magnifyingglass.circle.fill")
+                Image(systemName: vm.isDeleting ? "trash.circle.fill" : (vm.isDiscoveringFolders ? "folder.badge.gearshape" : "magnifyingglass.circle.fill"))
                     .font(.system(size: 40))
                     .foregroundStyle(.blue.gradient)
-                Text(vm.isDiscoveringFolders ? "Discovering Folders" : "Analyzing Images")
+                Text(vm.isDeleting ? "Moving Items to Trash" : (vm.isDiscoveringFolders ? "Discovering Folders" : "Analyzing Images"))
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.primary)
             }
 
-            if vm.isDiscoveringFolders {
+            if vm.isDeleting {
+                ProgressView()
+                    .frame(width: columnWidth)
+                Text("Please wait while the selected items are moved.")
+                    .foregroundStyle(.secondary)
+            } else if vm.isDiscoveringFolders {
                 ProgressView()
                     .frame(width: columnWidth)
             } else if vm.isProcessing {
@@ -131,10 +136,10 @@ extension ContentView {
         VStack(spacing: 6) {
             // Section header
             HStack(spacing: 6) {
-                Image(systemName: vm.isDiscoveringFolders ? "folder.badge.gearshape" : "line.3.horizontal")
+                Image(systemName: vm.isDeleting ? "trash" : (vm.isDiscoveringFolders ? "folder.badge.gearshape" : "line.3.horizontal"))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.secondary)
-                Text(vm.isDiscoveringFolders ? "Scanning Parent Folders" : "Processing Folders")
+                Text(vm.isDeleting ? "Moving Folders" : (vm.isDiscoveringFolders ? "Scanning Parent Folders" : "Processing Folders"))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -484,17 +489,15 @@ struct MatchedFolderDeletionSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(vm.isAnyOperationRunning)
                 Spacer()
                 Button(role: .destructive) {
                     guard let option = selectedOption else { return }
                     vm.deleteMatchedFolders(underParentPath: option.path)
-                    if vm.matchedFolderDeletionErrorMessage == nil {
-                        dismiss()
-                    }
                 } label: {
                     Text("Move \(selectedOption?.candidates.count ?? 0) Folder\((selectedOption?.candidates.count ?? 0) == 1 ? "" : "s") to Trash")
                 }
-                .disabled(selectedOption?.candidates.isEmpty != false)
+                .disabled(selectedOption?.candidates.isEmpty != false || vm.isAnyOperationRunning)
             }
         }
         .padding(20)

@@ -65,6 +65,9 @@ open twinalyzer.xcodeproj
 
 ## 📝 Changelog
 
+### 1.4.1
+- Tweaked deletion to support deleting over a network share.
+
 ### 1.4.0
 - Added a database for Enhanced Scans, to improve re-scanning speed. 
 - Enhanced interface of 'delete matched folders' overlay. 

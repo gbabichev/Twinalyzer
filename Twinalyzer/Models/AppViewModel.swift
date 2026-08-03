@@ -47,6 +47,7 @@ final class AppViewModel: ObservableObject {
     @Published var enhancedScanReuseStatus: EnhancedScanReuseStatus?
     @Published var processingETA: TimeInterval? = nil
     @Published var isDiscoveringFolders: Bool = false
+    @Published private(set) var isDeleting: Bool = false
     @Published var comparisonResults: [ImageComparisonResult] = [] {
         didSet { invalidateAllCaches() }
     }
@@ -106,7 +107,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var isAnyOperationRunning: Bool {
-        isProcessing || isDiscoveringFolders
+        isProcessing || isDiscoveringFolders || isDeleting
     }
     
     var allFoldersBeingProcessed: [URL] {
@@ -259,6 +260,56 @@ final class AppViewModel: ObservableObject {
     }
     
     // MARK: - User Actions
+
+    private enum TrashError: LocalizedError {
+        case itemWasNotRecycled
+
+        var errorDescription: String? {
+            "The item was not moved to the Trash."
+        }
+    }
+
+    /// Recycle through AppKit so the operation uses the same volume-aware path
+    /// as Finder, including network shares that have a volume Trash.
+    private func moveToTrash(_ url: URL) async throws {
+        let trashedURLs = try await NSWorkspace.shared.recycle([url])
+        guard trashedURLs[url] != nil else {
+            throw TrashError.itemWasNotRecycled
+        }
+    }
+
+    private func deleteFiles(_ paths: Set<String>) {
+        guard !paths.isEmpty, !isAnyOperationRunning else { return }
+
+        isDeleting = true
+        Task { [self] in
+            defer { isDeleting = false }
+
+            for path in paths {
+                do {
+                    try await moveToTrash(URL(fileURLWithPath: path))
+                    removeDeletedFileFromResults(path)
+                } catch {
+                    print("Failed to move file to trash: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func removeDeletedFileFromResults(_ path: String) {
+        for (index, result) in comparisonResults.enumerated().reversed() {
+            let filteredSimilars = result.similars.filter { $0.path != path }
+            let hasNonReferenceSimilars = filteredSimilars.contains { $0.path != result.reference }
+            if result.reference == path || !hasNonReferenceSimilars {
+                comparisonResults.remove(at: index)
+            } else if filteredSimilars.count != result.similars.count {
+                comparisonResults[index] = ImageComparisonResult(
+                    reference: result.reference,
+                    similars: filteredSimilars
+                )
+            }
+        }
+    }
     
     private func isDescendant(_ child: URL, of ancestor: URL) -> Bool {
         let a = ancestor.standardizedFileURL.pathComponents
@@ -919,62 +970,53 @@ final class AppViewModel: ObservableObject {
         pendingReferenceDeletionSelection = nil
         selectedReferencesForDeletion.removeAll()
         selectedMatchesForDeletion.removeAll()
-        if !paths.isEmpty { paths.forEach(deleteFile) }
+        deleteFiles(paths)
     }
     
     func deleteFile(_ path: String) {
-        do {
-            try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
-        } catch {
-            print("Failed to move file to trash: \(error.localizedDescription)")
-        }
-        for (index, result) in comparisonResults.enumerated().reversed() {
-            let filteredSimilars = result.similars.filter { $0.path != path }
-            let hasNonReferenceSimilars = filteredSimilars.contains { $0.path != result.reference }
-            if result.reference == path || !hasNonReferenceSimilars {
-                comparisonResults.remove(at: index)
-            } else if filteredSimilars.count != result.similars.count {
-                comparisonResults[index] = ImageComparisonResult(
-                    reference: result.reference,
-                    similars: filteredSimilars
-                )
-            }
-        }
+        deleteFiles([path])
     }
 
     func deleteFolder(_ folderPath: String) {
-        do {
-            let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
-            try FileManager.default.trashItem(at: folderURL, resultingItemURL: nil)
-            print("Moved folder to trash: \(folderPath)")
+        guard !isAnyOperationRunning else { return }
 
-            // Remove the deleted folder from discovered leaf folders and exclusions
-            let deletedURL = folderURL.standardizedFileURL
-            discoveredLeafFolders.removeAll { $0.standardizedFileURL == deletedURL }
-            excludedLeafFolders = excludedLeafFolders.filter { $0.standardizedFileURL != deletedURL }
+        let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+        isDeleting = true
+        Task { [self] in
+            defer { isDeleting = false }
 
-            // Remove all comparison results involving this folder
-            comparisonResults = comparisonResults.compactMap { result in
-                let refFolder = URL(fileURLWithPath: result.reference).deletingLastPathComponent().path
-                let similarsInFolder = result.similars.filter { similar in
-                    let simFolder = URL(fileURLWithPath: similar.path).deletingLastPathComponent().path
-                    return simFolder != folderPath
+            do {
+                try await moveToTrash(folderURL)
+                print("Moved folder to trash: \(folderPath)")
+
+                // Remove the deleted folder from discovered leaf folders and exclusions
+                let deletedURL = folderURL.standardizedFileURL
+                discoveredLeafFolders.removeAll { $0.standardizedFileURL == deletedURL }
+                excludedLeafFolders = excludedLeafFolders.filter { $0.standardizedFileURL != deletedURL }
+
+                // Remove all comparison results involving this folder
+                comparisonResults = comparisonResults.compactMap { result in
+                    let refFolder = URL(fileURLWithPath: result.reference).deletingLastPathComponent().path
+                    let similarsInFolder = result.similars.filter { similar in
+                        let simFolder = URL(fileURLWithPath: similar.path).deletingLastPathComponent().path
+                        return simFolder != folderPath
+                    }
+
+                    // Remove the entire result if reference is in deleted folder or no similars remain
+                    if refFolder == folderPath || similarsInFolder.count <= 1 {
+                        return nil
+                    }
+
+                    return ImageComparisonResult(reference: result.reference, similars: similarsInFolder)
                 }
 
-                // Remove the entire result if reference is in deleted folder or no similars remain
-                if refFolder == folderPath || similarsInFolder.count <= 1 {
-                    return nil
-                }
+                // Rebuild the table and snapshots
+                invalidateAllCaches()
+                updateDisplayedRows(sortOrder: [])
 
-                return ImageComparisonResult(reference: result.reference, similars: similarsInFolder)
+            } catch {
+                print("Failed to move folder to trash: \(error.localizedDescription)")
             }
-
-            // Rebuild the table and snapshots
-            invalidateAllCaches()
-            updateDisplayedRows(sortOrder: [])
-
-        } catch {
-            print("Failed to move folder to trash: \(error.localizedDescription)")
         }
     }
 
@@ -1031,45 +1073,49 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        var deletedPaths = Set<String>()
-        var failures: [String] = []
-        for candidate in option.candidates {
-            do {
-                try FileManager.default.trashItem(
-                    at: URL(fileURLWithPath: candidate.path, isDirectory: true),
-                    resultingItemURL: nil
-                )
-                deletedPaths.insert(candidate.path)
-                print("Moved folder to trash: \(candidate.path)")
-            } catch {
-                failures.append("\(candidate.relativePath): \(error.localizedDescription)")
-                print("Failed to move folder to trash: \(error.localizedDescription)")
+        let candidates = option.candidates
+        matchedFolderDeletionErrorMessage = nil
+        isDeleting = true
+        Task { [self] in
+            defer { isDeleting = false }
+
+            var deletedPaths = Set<String>()
+            var failures: [String] = []
+            for candidate in candidates {
+                do {
+                    try await moveToTrash(URL(fileURLWithPath: candidate.path, isDirectory: true))
+                    deletedPaths.insert(candidate.path)
+                    print("Moved folder to trash: \(candidate.path)")
+                } catch {
+                    failures.append("\(candidate.relativePath): \(error.localizedDescription)")
+                    print("Failed to move folder to trash: \(error.localizedDescription)")
+                }
             }
+
+            showMatchedFolderDeletionSheet = !failures.isEmpty
+            if !failures.isEmpty {
+                matchedFolderDeletionErrorMessage = failures.joined(separator: "\n")
+            }
+            guard !deletedPaths.isEmpty else { return }
+
+            // Remove only folders that were successfully moved to Trash.
+            let deletedURLs = Set(deletedPaths.map {
+                URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL
+            })
+            discoveredLeafFolders.removeAll { deletedURLs.contains($0.standardizedFileURL) }
+            excludedLeafFolders = excludedLeafFolders.filter { !deletedURLs.contains($0.standardizedFileURL) }
+
+            // Clear comparison results since we've modified the folder structure
+            comparisonResults.removeAll()
+            activeSortedRows.removeAll()
+
+            // Clear static snapshots
+            folderClustersStatic.removeAll()
+            representativeImageByFolderStatic.removeAll()
+            crossFolderDuplicateCountsStatic.removeAll()
+            folderDisplayNamesStatic.removeAll()
+            orderedCrossFolderPairsStatic.removeAll()
         }
-
-        showMatchedFolderDeletionSheet = !failures.isEmpty
-        if !failures.isEmpty {
-            matchedFolderDeletionErrorMessage = failures.joined(separator: "\n")
-        }
-        guard !deletedPaths.isEmpty else { return }
-
-        // Remove only folders that were successfully moved to Trash.
-        let deletedURLs = Set(deletedPaths.map {
-            URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL
-        })
-        discoveredLeafFolders.removeAll { deletedURLs.contains($0.standardizedFileURL) }
-        excludedLeafFolders = excludedLeafFolders.filter { !deletedURLs.contains($0.standardizedFileURL) }
-
-        // Clear comparison results since we've modified the folder structure
-        comparisonResults.removeAll()
-        activeSortedRows.removeAll()
-
-        // Clear static snapshots
-        folderClustersStatic.removeAll()
-        representativeImageByFolderStatic.removeAll()
-        crossFolderDuplicateCountsStatic.removeAll()
-        folderDisplayNamesStatic.removeAll()
-        orderedCrossFolderPairsStatic.removeAll()
     }
 
     private func relativePath(_ path: String, under parentPath: String) -> String {
