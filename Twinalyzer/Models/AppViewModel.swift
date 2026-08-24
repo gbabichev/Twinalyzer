@@ -79,7 +79,7 @@ final class AppViewModel: ObservableObject {
         var id: String { path }
         let path: String
         let relativePath: String
-        let externalMatchCount: Int
+        let matchCount: Int
     }
 
     struct MatchedFolderDeletionParentOption: Identifiable, Hashable {
@@ -87,6 +87,7 @@ final class AppViewModel: ObservableObject {
         let path: String
         let displayName: String
         let candidates: [MatchedFolderDeletionCandidate]
+        let usesInternalMatches: Bool
     }
     
     
@@ -1026,7 +1027,8 @@ final class AppViewModel: ObservableObject {
             let parent = parentURL.standardizedFileURL
             guard seenRoots.insert(parent.path).inserted else { return nil }
 
-            var counts: [String: Int] = [:]
+            var externalCounts: [String: Int] = [:]
+            var internalCounts: [String: Int] = [:]
             for pair in orderedCrossFolderPairsStatic {
                 let referenceInside = isDescendant(
                     URL(fileURLWithPath: pair.reference, isDirectory: true),
@@ -1037,18 +1039,25 @@ final class AppViewModel: ObservableObject {
                     of: parent
                 )
 
-                // Only select the endpoint under this parent when its counterpart is outside.
-                // Relationships wholly inside the chosen parent are intentionally ignored.
-                guard referenceInside != matchInside else { continue }
-                let candidatePath = referenceInside ? pair.reference : pair.match
-                counts[candidatePath, default: 0] += pair.count
+                if referenceInside != matchInside {
+                    // Preserve the existing cross-parent behavior: delete the endpoint
+                    // under the parent selected in the sheet.
+                    let candidatePath = referenceInside ? pair.reference : pair.match
+                    externalCounts[candidatePath, default: 0] += pair.count
+                } else if referenceInside && matchInside {
+                    // If every relationship is within this parent, preserve the
+                    // reference folder and offer the match folder for deletion.
+                    internalCounts[pair.match, default: 0] += pair.count
+                }
             }
 
+            let usesInternalMatches = externalCounts.isEmpty
+            let counts = usesInternalMatches ? internalCounts : externalCounts
             let candidates = counts.map { path, count in
                 MatchedFolderDeletionCandidate(
                     path: path,
                     relativePath: relativePath(path, under: parent.path),
-                    externalMatchCount: count
+                    matchCount: count
                 )
             }.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
 
@@ -1056,7 +1065,8 @@ final class AppViewModel: ObservableObject {
             return MatchedFolderDeletionParentOption(
                 path: parent.path,
                 displayName: parent.lastPathComponent,
-                candidates: candidates
+                candidates: candidates,
+                usesInternalMatches: usesInternalMatches
             )
         }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }

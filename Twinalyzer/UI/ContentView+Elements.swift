@@ -449,7 +449,9 @@ struct MatchedFolderDeletionSheet: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .truncationMode(.middle)
-                    Text("Only subfolders below this parent with matches outside this parent are included. Internal matches are ignored.")
+                    Text(option.usesInternalMatches
+                         ? "These matched folders are inside the same parent. The reference folder is kept and its match folder is included."
+                         : "Only subfolders below this parent with matches outside this parent are included. Internal matches are ignored.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -465,7 +467,7 @@ struct MatchedFolderDeletionSheet: View {
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                     Spacer()
-                                    Text("×\(candidate.externalMatchCount)")
+                                    Text("×\(candidate.matchCount)")
                                         .font(.caption.monospacedDigit())
                                         .foregroundStyle(.secondary)
                                 }
@@ -482,7 +484,7 @@ struct MatchedFolderDeletionSheet: View {
                 ContentUnavailableView(
                     "No Deletion Candidates",
                     systemImage: "folder.badge.questionmark",
-                    description: Text("No selected parent contains a folder matched outside that parent.")
+                    description: Text("No selected parent contains matched folders that can be deleted.")
                 )
             }
 
