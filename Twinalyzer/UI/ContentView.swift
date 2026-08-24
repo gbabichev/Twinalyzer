@@ -200,7 +200,10 @@ struct ContentView: View {
             
             // In the toolbar section, add this new ToolbarItem
             ToolbarItem(placement: .status) {
-                if !vm.isProcessing && !vm.comparisonResults.isEmpty {
+                if vm.isDeleting {
+                    Text("Moving items to Trash…")
+                        .padding(.horizontal)
+                } else if !vm.isProcessing && !vm.comparisonResults.isEmpty {
                     Text("Found \(displayedRows.count) duplicates")
                         .padding(.horizontal)
                 }

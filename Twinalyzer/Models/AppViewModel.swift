@@ -286,29 +286,37 @@ final class AppViewModel: ObservableObject {
         Task { [self] in
             defer { isDeleting = false }
 
+            var deletedPaths = Set<String>()
             for path in paths {
                 do {
                     try await moveToTrash(URL(fileURLWithPath: path))
-                    removeDeletedFileFromResults(path)
+                    deletedPaths.insert(path)
                 } catch {
                     print("Failed to move file to trash: \(error.localizedDescription)")
                 }
             }
+
+            // Publish one results change after the filesystem work completes instead
+            // of invalidating caches and redrawing the UI after every deleted file.
+            removeDeletedFilesFromResults(deletedPaths)
         }
     }
 
-    private func removeDeletedFileFromResults(_ path: String) {
-        for (index, result) in comparisonResults.enumerated().reversed() {
-            let filteredSimilars = result.similars.filter { $0.path != path }
+    private func removeDeletedFilesFromResults(_ paths: Set<String>) {
+        guard !paths.isEmpty else { return }
+
+        comparisonResults = comparisonResults.compactMap { result in
+            guard !paths.contains(result.reference) else { return nil }
+
+            let filteredSimilars = result.similars.filter { !paths.contains($0.path) }
             let hasNonReferenceSimilars = filteredSimilars.contains { $0.path != result.reference }
-            if result.reference == path || !hasNonReferenceSimilars {
-                comparisonResults.remove(at: index)
-            } else if filteredSimilars.count != result.similars.count {
-                comparisonResults[index] = ImageComparisonResult(
-                    reference: result.reference,
-                    similars: filteredSimilars
-                )
-            }
+            guard hasNonReferenceSimilars else { return nil }
+            guard filteredSimilars.count != result.similars.count else { return result }
+
+            return ImageComparisonResult(
+                reference: result.reference,
+                similars: filteredSimilars
+            )
         }
     }
     
