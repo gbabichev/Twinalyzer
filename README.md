@@ -66,6 +66,7 @@ open twinalyzer.xcodeproj
 ## 📝 Changelog
 
 ### 1.4.1
+- Ensured duplicate folder deletion properly enables when folders are in the same root folder. 
 - Tweaked deletion to support deleting over a network share.
 
 ### 1.4.0
